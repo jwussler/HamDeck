@@ -1,2 +1,0 @@
-C:\Users\jwuss\OneDrive\Desktop\HamDeck-clean\bin\publish\HamDeck.pdb
-C:\Users\jwuss\OneDrive\Desktop\HamDeck-clean\bin\publish\HamDeck.exe
