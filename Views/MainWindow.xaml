@@ -1,0 +1,323 @@
+<Window x:Class="HamDeck.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:tb="http://www.hardcodet.net/taskbar"
+        Title="HamDeck v2.0" Width="720" Height="860"
+        Background="{StaticResource DarkBgBrush}"
+        Icon="/Resources/hamdeck.ico"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <!-- Frequency display font -->
+        <Style x:Key="FreqDisplay" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="36"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+        </Style>
+        <Style x:Key="FreqDisplayB" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="Foreground" Value="{StaticResource DimTextBrush}"/>
+        </Style>
+        <Style x:Key="SectionLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="{StaticResource DimTextBrush}"/>
+            <Setter Property="Margin" Value="0,6,0,2"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <!-- System Tray Icon -->
+        <tb:TaskbarIcon x:Name="TrayIcon" IconSource="/Resources/hamdeck.ico"
+                        TrayMouseDoubleClick="TrayIcon_DoubleClick">
+            <tb:TaskbarIcon.TrayToolTip>
+                <Border Background="#FF0D1B33" BorderBrush="#FF00D4FF" BorderThickness="1"
+                        CornerRadius="4" Padding="10,6">
+                    <TextBlock Text="HamDeck v2.0 — WA0O" Foreground="#FFEAEAEA" FontSize="12"
+                               FontFamily="Segoe UI"/>
+                </Border>
+            </tb:TaskbarIcon.TrayToolTip>
+            <tb:TaskbarIcon.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Show HamDeck" Click="TrayShow_Click"/>
+                    <Separator/>
+                    <MenuItem Header="Exit" Click="TrayExit_Click"/>
+                </ContextMenu>
+            </tb:TaskbarIcon.ContextMenu>
+        </tb:TaskbarIcon>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10">
+            <StackPanel>
+
+                <!-- ===== CONNECTION BAR ===== -->
+                <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="12,8" Margin="0,0,0,6">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock x:Name="ConnStatus" Text="● Disconnected" Foreground="{StaticResource ErrorBrush}"
+                                   FontSize="14" VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                        <ComboBox x:Name="PortSelect" Grid.Column="1" Margin="0,0,6,0"
+                                  Background="{StaticResource InputBgBrush}" Foreground="White"/>
+
+                        <Button x:Name="AutoDetectBtn" Grid.Column="2" Content="🔍" Style="{StaticResource HamButton}"
+                                Click="AutoDetect_Click" ToolTip="Auto-detect radio" Margin="0,0,6,0"/>
+
+                        <Button x:Name="ConnectBtn" Grid.Column="3" Content="Connect" Style="{StaticResource PrimaryButton}"
+                                Click="Connect_Click"/>
+
+                        <StackPanel Grid.Column="5" Orientation="Horizontal">
+                            <Button Content="📡 DX Cluster" Style="{StaticResource HamButton}" Click="DxCluster_Click" Margin="0,0,6,0"/>
+                            <Button Content="⚙ Settings" Style="{StaticResource HamButton}" Click="Settings_Click" Margin="0,0,6,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- ===== FREQUENCY DISPLAY ===== -->
+                <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="16,12" Margin="0,0,0,6">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock x:Name="FreqLabel" Text="0.000.000" Style="{StaticResource FreqDisplay}"/>
+                                <TextBlock x:Name="FreqLabelB" Text="" Style="{StaticResource FreqDisplayB}"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock x:Name="ModeLabel" Text="---" FontSize="20" FontWeight="Bold"
+                                           Foreground="{StaticResource WarningBrush}" HorizontalAlignment="Right"/>
+                                <TextBlock x:Name="VfoLabel" Text="VFO-?" FontSize="14"
+                                           Foreground="{StaticResource DimTextBrush}" HorizontalAlignment="Right"/>
+                                <TextBlock x:Name="TxIndicator" Text="" FontSize="14" FontWeight="Bold"
+                                           Foreground="{StaticResource TxBrush}" HorizontalAlignment="Right"/>
+                                <TextBlock x:Name="SplitIndicator" Text="" FontSize="12"
+                                           Foreground="{StaticResource WarningBrush}" HorizontalAlignment="Right"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- S-Meter -->
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="80"/>
+                            </Grid.ColumnDefinitions>
+                            <ProgressBar x:Name="SMeterBar" Minimum="0" Maximum="255" Height="14"
+                                         Foreground="{StaticResource PrimaryBrush}" Background="{StaticResource InputBgBrush}"/>
+                            <TextBlock x:Name="SMeterLabel" Grid.Column="1" Text="S0" FontFamily="Consolas"
+                                       FontSize="14" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <!-- Power display -->
+                        <TextBlock x:Name="PowerLabel" Text="Power: ---" FontSize="12" Margin="0,4,0,0"
+                                   Foreground="{StaticResource DimTextBrush}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== BAND BUTTONS ===== -->
+                <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+                    <StackPanel>
+                        <TextBlock Text="BAND" Style="{StaticResource SectionLabel}"/>
+                        <WrapPanel>
+                            <Button Content="160" Style="{StaticResource HamButton}" Click="Band_Click" Tag="160" Margin="2"/>
+                            <Button Content="80" Style="{StaticResource HamButton}" Click="Band_Click" Tag="80" Margin="2"/>
+                            <Button Content="60" Style="{StaticResource HamButton}" Click="Band_Click" Tag="60" Margin="2"/>
+                            <Button Content="40" Style="{StaticResource HamButton}" Click="Band_Click" Tag="40" Margin="2"/>
+                            <Button Content="30" Style="{StaticResource HamButton}" Click="Band_Click" Tag="30" Margin="2"/>
+                            <Button Content="20" Style="{StaticResource HamButton}" Click="Band_Click" Tag="20" Margin="2"/>
+                            <Button Content="17" Style="{StaticResource HamButton}" Click="Band_Click" Tag="17" Margin="2"/>
+                            <Button Content="15" Style="{StaticResource HamButton}" Click="Band_Click" Tag="15" Margin="2"/>
+                            <Button Content="12" Style="{StaticResource HamButton}" Click="Band_Click" Tag="12" Margin="2"/>
+                            <Button Content="10" Style="{StaticResource HamButton}" Click="Band_Click" Tag="10" Margin="2"/>
+                            <Button Content="6" Style="{StaticResource HamButton}" Click="Band_Click" Tag="6" Margin="2"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== MODE & VFO ===== -->
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,3,0">
+                        <StackPanel>
+                            <TextBlock Text="MODE" Style="{StaticResource SectionLabel}"/>
+                            <WrapPanel>
+                                <Button Content="LSB" Style="{StaticResource HamButton}" Click="Mode_Click" Tag="LSB" Margin="2"/>
+                                <Button Content="USB" Style="{StaticResource HamButton}" Click="Mode_Click" Tag="USB" Margin="2"/>
+                                <Button Content="CW" Style="{StaticResource HamButton}" Click="Mode_Click" Tag="CW" Margin="2"/>
+                                <Button Content="AM" Style="{StaticResource HamButton}" Click="Mode_Click" Tag="AM" Margin="2"/>
+                                <Button Content="FM" Style="{StaticResource HamButton}" Click="Mode_Click" Tag="FM" Margin="2"/>
+                                <Button Content="DATA" Style="{StaticResource HamButton}" Click="Mode_Click" Tag="DATA-U" Margin="2"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="3,0,0,0">
+                        <StackPanel>
+                            <TextBlock Text="VFO" Style="{StaticResource SectionLabel}"/>
+                            <WrapPanel>
+                                <Button Content="VFO-A" Style="{StaticResource HamButton}" Click="VfoA_Click" Margin="2"/>
+                                <Button Content="VFO-B" Style="{StaticResource HamButton}" Click="VfoB_Click" Margin="2"/>
+                                <Button Content="A↔B" Style="{StaticResource HamButton}" Click="VfoSwap_Click" Margin="2"/>
+                                <Button Content="A→B" Style="{StaticResource HamButton}" Click="VfoCopyAB_Click" Margin="2"/>
+                                <Button Content="Split" Style="{StaticResource HamButton}" Click="SplitToggle_Click" Margin="2"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <!-- ===== POWER & TUNERS ===== -->
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,3,0">
+                        <StackPanel>
+                            <TextBlock Text="POWER" Style="{StaticResource SectionLabel}"/>
+                            <WrapPanel>
+                                <Button Content="QRP" Style="{StaticResource HamButton}" Click="Power_Click" Tag="5" Margin="2"/>
+                                <Button Content="25W" Style="{StaticResource HamButton}" Click="Power_Click" Tag="25" Margin="2"/>
+                                <Button Content="50W" Style="{StaticResource HamButton}" Click="Power_Click" Tag="50" Margin="2"/>
+                                <Button Content="100W" Style="{StaticResource HamButton}" Click="Power_Click" Tag="100" Margin="2"/>
+                                <Button Content="200W" Style="{StaticResource HamButton}" Click="Power_Click" Tag="200" Margin="2"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="3,0,0,0">
+                        <StackPanel>
+                            <TextBlock Text="TUNERS" Style="{StaticResource SectionLabel}"/>
+                            <WrapPanel>
+                                <Button Content="ATU" Style="{StaticResource HamButton}" Click="Tune_Click" Margin="2"/>
+                                <Button Content="TG-XL" Style="{StaticResource HamButton}" Click="TgxlTune_Click" Margin="2"/>
+                                <Button Content="Amp Tune" Style="{StaticResource HamButton}" Click="AmpTune_Click" Margin="2"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <!-- ===== FILTERS & PROCESSING ===== -->
+                <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+                    <StackPanel>
+                        <TextBlock Text="FILTERS &amp; PROCESSING" Style="{StaticResource SectionLabel}"/>
+                        <WrapPanel>
+                            <Button Content="NB" Style="{StaticResource HamButton}" Click="ToggleNB_Click" Margin="2"/>
+                            <Button Content="NR" Style="{StaticResource HamButton}" Click="ToggleNR_Click" Margin="2"/>
+                            <Button Content="Notch" Style="{StaticResource HamButton}" Click="ToggleNotch_Click" Margin="2"/>
+                            <Button Content="VOX" Style="{StaticResource HamButton}" Click="ToggleVOX_Click" Margin="2"/>
+                            <Button Content="Comp" Style="{StaticResource HamButton}" Click="ToggleComp_Click" Margin="2"/>
+                            <Button Content="Preamp" Style="{StaticResource HamButton}" Click="CyclePreamp_Click" Margin="2"/>
+                            <Button Content="ATT" Style="{StaticResource HamButton}" Click="ToggleATT_Click" Margin="2"/>
+                            <Button Content="Lock" Style="{StaticResource HamButton}" Click="ToggleLock_Click" Margin="2"/>
+                            <Button Content="AGC" Style="{StaticResource HamButton}" Click="CycleAGC_Click" Margin="2"/>
+                            <Button Content="ANT" Style="{StaticResource HamButton}" Click="ToggleAntenna_Click" Margin="2"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== FLEXKNOB CONTROLLER ===== -->
+                <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="FLEXKNOB" Style="{StaticResource SectionLabel}" Margin="0,0,10,0"/>
+                            <TextBlock x:Name="FlexKnobStatus" Grid.Column="1" Text="Disconnected"
+                                       FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource DimTextBrush}"/>
+                            <TextBlock x:Name="FlexKnobAction" Grid.Column="2" Text=""
+                                       FontFamily="Consolas" FontSize="11" VerticalAlignment="Center"
+                                       Foreground="{StaticResource WarningBrush}"/>
+                        </Grid>
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="FlexModeBtn" Content="FREQ" Style="{StaticResource HamButton}"
+                                    Click="FlexMode_Click" ToolTip="Cycle knob mode (B1)" Margin="2" MinWidth="55"/>
+                            <Button x:Name="FlexStepBtn" Grid.Column="1" Content="100 Hz" Style="{StaticResource HamButton}"
+                                    Click="FlexStep_Click" ToolTip="Cycle step size (B2)" Margin="2" MinWidth="65"/>
+                            <Button Content="VOL" Grid.Column="2" Style="{StaticResource HamButton}"
+                                    Click="FlexSetVol_Click" ToolTip="Switch to Volume mode" Margin="2"/>
+                            <Button Content="RIT" Grid.Column="3" Style="{StaticResource HamButton}"
+                                    Click="FlexSetRIT_Click" ToolTip="Switch to RIT mode" Margin="2"/>
+                            <Button Content="CLR RIT" Grid.Column="4" Style="{StaticResource HamButton}"
+                                    Click="FlexClearRIT_Click" ToolTip="Clear RIT offset" Margin="2"/>
+                            <Button x:Name="FlexConnBtn" Grid.Column="6" Content="Connect" Style="{StaticResource HamButton}"
+                                    Click="FlexConnect_Click" Margin="2"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== RECORDING ===== -->
+                <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="RecordBtn" Content="⏺ Record" Style="{StaticResource HamButton}"
+                                Click="RecordToggle_Click" Margin="0,0,6,0"/>
+                        <Button Content="💾 Replay" Grid.Column="1" Style="{StaticResource HamButton}"
+                                Click="SaveReplay_Click" Margin="0,0,6,0"/>
+                        <Button Content="📂 Open" Grid.Column="2" Style="{StaticResource HamButton}"
+                                Click="OpenRecordFolder_Click" Margin="0,0,6,0"/>
+                        <TextBlock x:Name="RecordStatus" Grid.Column="3" Text="Buffer ready"
+                                   VerticalAlignment="Center" Foreground="{StaticResource DimTextBrush}"/>
+                        <TextBlock x:Name="RecordTime" Grid.Column="4" Text=""
+                                   FontFamily="Consolas" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+
+                <!-- ===== FREQUENCY ENTRY ===== -->
+                <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="FreqEntry" FontSize="16" FontFamily="Consolas"
+                                 Background="{StaticResource InputBgBrush}" Foreground="White"
+                                 BorderBrush="{StaticResource SeparatorBrush}" Padding="8,4"
+                                 KeyDown="FreqEntry_KeyDown"
+                                 ToolTip="Enter freq: 14.200, 14200, or 14200000 then Enter"/>
+                        <Button Grid.Column="1" Content="QSY" Style="{StaticResource PrimaryButton}"
+                                Click="FreqGo_Click" Margin="6,0,0,0"/>
+                    </Grid>
+                </Border>
+
+                <!-- ===== SESSION STATS ===== -->
+                <Border Background="{StaticResource CardBgBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+                    <TextBlock x:Name="StatsLabel" Text="Session: 00:00:00 | QSY: 0 | TX: 0 | TX Time: 00:00:00"
+                               FontSize="12" Foreground="{StaticResource DimTextBrush}"/>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>

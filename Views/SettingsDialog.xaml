@@ -1,0 +1,105 @@
+<Window x:Class="HamDeck.Views.SettingsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HamDeck Settings" Width="520" Height="620"
+        Background="{StaticResource DarkBgBrush}"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- Radio -->
+                <TextBlock Text="Radio" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,0,0,8"/>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="COM Port:" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="RadioPortBox" Grid.Column="1" IsEditable="True"/>
+                </Grid>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Baud Rate:" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="BaudBox" Grid.Column="1"/>
+                </Grid>
+
+                <!-- API -->
+                <TextBlock Text="API Server" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <CheckBox x:Name="ApiEnabledBox" Content="Enable HTTP API" Foreground="White" Margin="0,0,0,4"/>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="API Port:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="ApiPortBox" Grid.Column="1" Width="80" HorizontalAlignment="Left"
+                             Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+
+                <!-- Wavelog -->
+                <TextBlock Text="Wavelog Integration" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <CheckBox x:Name="WavelogEnabledBox" Content="Enable Wavelog" Foreground="White" Margin="0,0,0,4"/>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Wavelog URL:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="WavelogUrlBox" Grid.Column="1" Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="API Key:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="WavelogKeyBox" Grid.Column="1" Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Station ID:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="WavelogStationBox" Grid.Column="1" Width="60" HorizontalAlignment="Left"
+                             Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+
+                <!-- TG-XL -->
+                <TextBlock Text="TG-XL Tuner" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="TGXL Host:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="TgxlHostBox" Grid.Column="1" Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="TGXL Port:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="TgxlPortBox" Grid.Column="1" Width="80" HorizontalAlignment="Left"
+                             Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+
+                <!-- DX Cluster -->
+                <TextBlock Text="DX Cluster" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <CheckBox x:Name="ClusterEnabledBox" Content="Enable DX Cluster" Foreground="White" Margin="0,0,0,4"/>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="API URL:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="ClusterUrlBox" Grid.Column="1" Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+
+                <!-- FlexKnob -->
+                <TextBlock Text="FlexKnob" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <CheckBox x:Name="FlexknobEnabledBox" Content="Enable FlexKnob" Foreground="White" Margin="0,0,0,4"/>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="FlexKnob Port:" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="FlexknobPortBox" Grid.Column="1" IsEditable="True"/>
+                </Grid>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Baud Rate:" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="FlexknobBaudBox" Grid.Column="1"/>
+                </Grid>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Default Step (Hz):" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="FlexknobStepBox" Grid.Column="1"/>
+                </Grid>
+
+                <!-- Window -->
+                <TextBlock Text="Window" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <CheckBox x:Name="StartMinBox" Content="Start minimized" Foreground="White" Margin="0,0,0,4"/>
+                <CheckBox x:Name="TrayBox" Content="Minimize to system tray" Foreground="White" Margin="0,0,0,4"/>
+
+                <!-- Logging -->
+                <TextBlock Text="Logging" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <CheckBox x:Name="LogFileBox" Content="Log to file" Foreground="White" Margin="0,0,0,4"/>
+                <CheckBox x:Name="DebugBox" Content="Debug logging" Foreground="White"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel" Style="{StaticResource HamButton}" Click="Cancel_Click" Margin="0,0,8,0" Width="80"/>
+            <Button Content="Save" Style="{StaticResource PrimaryButton}" Click="Save_Click" Width="80"/>
+        </StackPanel>
+    </Grid>
+</Window>
