@@ -32,9 +32,15 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _updateTimer;
 
     private bool _running = true;
+    private bool _forceExit;
     private string _lastBand = "";
     private string _lastMode = "";
 
+    // Connection state tracking for auto-reconnect
+    private bool _wasConnected;
+    private DateTime _nextReconnectAttempt = DateTime.MaxValue; // Only reconnect after a drop
+    private bool _reconnecting;
+    private static readonly TimeSpan ReconnectInterval = TimeSpan.FromSeconds(5);
 
     // PTT auto-record state (matching Go: lastPTTState, autoRecordActive, autoRecordTimer, etc.)
     private bool _lastPTTState;
@@ -165,8 +171,10 @@ public partial class MainWindow : Window
             _radio.Connect(_config.RadioPort, _config.RadioBaud);
             Dispatcher.Invoke(() =>
             {
+                _wasConnected = true;
                 ConnStatus.Text = "● Connected";
                 ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
+                ConnectBtn.Content = "Disconnect";
             });
         }
         catch (Exception ex)
@@ -180,6 +188,8 @@ public partial class MainWindow : Window
         if (_radio.Connected)
         {
             _radio.Disconnect();
+            _wasConnected = false;
+            _nextReconnectAttempt = DateTime.MaxValue; // Don't auto-reconnect after manual disconnect
             ConnStatus.Text = "● Disconnected";
             ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
             ConnectBtn.Content = "Connect";
@@ -194,6 +204,7 @@ public partial class MainWindow : Window
             _radio.Connect(port, _config.RadioBaud);
             _config.RadioPort = port;
             _config.Save();
+            _wasConnected = true;
             ConnStatus.Text = "● Connected";
             ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
             ConnectBtn.Content = "Disconnect";
@@ -218,6 +229,7 @@ public partial class MainWindow : Window
                     PortSelect.SelectedItem = port;
                     _config.RadioPort = port;
                     _config.Save();
+                    _wasConnected = true;
                     ConnStatus.Text = "● Connected";
                     ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
                     ConnectBtn.Content = "Disconnect";
@@ -235,8 +247,94 @@ public partial class MainWindow : Window
 
     private void UpdateTick(object? sender, EventArgs e)
     {
-        if (!_running || !_radio.Connected) return;
+        if (!_running) return;
 
+        // ===== DISCONNECTED STATE: detect drop, update UI, attempt reconnect =====
+        if (!_radio.Connected)
+        {
+            // Transition: was connected → now disconnected
+            if (_wasConnected)
+            {
+                _wasConnected = false;
+                Logger.Warn("RADIO", "Radio disconnected — will auto-reconnect every {0}s", ReconnectInterval.TotalSeconds);
+
+                // Update UI to show disconnected state
+                ConnStatus.Text = "● Disconnected";
+                ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
+                ConnectBtn.Content = "Connect";
+                TxIndicator.Text = "";
+                SplitIndicator.Text = "";
+                FreqLabelB.Text = "";
+                ModeLabel.Text = "---";
+                VfoLabel.Text = "VFO-?";
+                SMeterBar.Value = 0;
+                SMeterLabel.Text = "S0";
+                PowerLabel.Text = "Power: ---";
+
+                // Stop PTT auto-record if active (radio is gone, save what we have)
+                if (_autoRecordActive)
+                {
+                    Logger.Info("RECORD", "Radio lost — saving PTT recording");
+                    StopPTTRecording();
+                }
+                _lastPTTState = false;
+
+                // Schedule first reconnect attempt
+                _nextReconnectAttempt = DateTime.UtcNow.Add(ReconnectInterval);
+            }
+
+            // Auto-reconnect: try periodically on a background thread
+            if (!_reconnecting && !string.IsNullOrEmpty(_config.RadioPort)
+                && DateTime.UtcNow >= _nextReconnectAttempt)
+            {
+                _reconnecting = true;
+                _nextReconnectAttempt = DateTime.UtcNow.Add(ReconnectInterval);
+
+                ConnStatus.Text = "● Reconnecting...";
+                ConnStatus.Foreground = FindResource("WarningBrush") as SolidColorBrush;
+
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        // Release stale port handle before reconnecting
+                        // (when radio drops, _port may still be open even though Connected=false)
+                        _radio.Disconnect();
+
+                        _radio.Connect(_config.RadioPort, _config.RadioBaud);
+                        Dispatcher.Invoke(() =>
+                        {
+                            ConnStatus.Text = "● Connected";
+                            ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
+                            ConnectBtn.Content = "Disconnect";
+                            _wasConnected = true;
+                            Logger.Info("RADIO", "Auto-reconnected on {0}", _config.RadioPort);
+                        });
+                    }
+                    catch
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            ConnStatus.Text = "● Disconnected";
+                            ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
+                        });
+                    }
+                    finally
+                    {
+                        _reconnecting = false;
+                    }
+                });
+            }
+
+            // Still update stats display while disconnected
+            StatsLabel.Text = $"Session: {_stats.SessionDuration} | QSY: {_stats.QSYCount} | TX: {_stats.PTTCount} | TX Time: {_stats.TXTimeDisplay}";
+            return;
+        }
+
+        // Track that we're connected (for detecting future disconnects)
+        _wasConnected = true;
+
+        // ===== CONNECTED STATE: normal polling =====
         try
         {
             var freq = _radio.GetFreq();
@@ -358,6 +456,14 @@ public partial class MainWindow : Window
 
             // Stats
             StatsLabel.Text = $"Session: {_stats.SessionDuration} | QSY: {_stats.QSYCount} | TX: {_stats.PTTCount} | TX Time: {_stats.TXTimeDisplay}";
+
+            // Ensure connection UI is correct (handles reconnect case)
+            if (ConnectBtn.Content.ToString() != "Disconnect")
+            {
+                ConnStatus.Text = "● Connected";
+                ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
+                ConnectBtn.Content = "Disconnect";
+            }
 
             // FlexKnob connection indicator
             if (_flexknob.IsConnected)
@@ -695,6 +801,12 @@ public partial class MainWindow : Window
 
     private void TrayExit_Click(object sender, RoutedEventArgs e)
     {
+        ForceExit();
+    }
+
+    private void ForceExit()
+    {
+        _forceExit = true;
         _running = false;
         Cleanup();
         Application.Current.Shutdown();
@@ -702,7 +814,7 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_config.MinimizeToTray)
+        if (_config.MinimizeToTray && !_forceExit)
         {
             e.Cancel = true;
             WindowState = WindowState.Minimized;

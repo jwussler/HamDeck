@@ -33,25 +33,36 @@ public class RadioController : IDisposable
             RtsEnable = true
         };
 
-        port.Open();
-        Thread.Sleep(100);
-
-        _port = port;
-        PortName = portName;
-        _failCount = 0;
-
-        // Test connection
-        var freq = GetFreq();
-        if (freq > 0)
+        try
         {
-            Connected = true;
-            Logger.Info("RADIO", "Connected! Freq: {0} Hz", freq);
+            port.Open();
+            Thread.Sleep(100);
+
+            _port = port;
+            PortName = portName;
+            _failCount = 0;
+
+            // Test connection
+            var freq = GetFreq();
+            if (freq > 0)
+            {
+                Connected = true;
+                Logger.Info("RADIO", "Connected! Freq: {0} Hz", freq);
+            }
+            else
+            {
+                port.Close();
+                port.Dispose();
+                _port = null;
+                throw new Exception("Radio not responding");
+            }
         }
-        else
+        catch
         {
-            port.Close();
+            // Clean up port on any failure
+            try { port.Dispose(); } catch { }
             _port = null;
-            throw new Exception("Radio not responding");
+            throw;
         }
     }
 
@@ -60,8 +71,21 @@ public class RadioController : IDisposable
         lock (_lock)
         {
             Connected = false;
-            try { _port?.Close(); } catch { }
-            _port = null;
+            if (_port != null)
+            {
+                try
+                {
+                    if (_port.IsOpen)
+                        _port.Close();
+                }
+                catch { }
+                try { _port.Dispose(); } catch { }
+                _port = null;
+
+                // Windows needs time to fully release COM port handle
+                Thread.Sleep(100);
+            }
+            PortName = "";
         }
     }
 
