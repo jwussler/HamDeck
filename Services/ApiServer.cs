@@ -103,7 +103,7 @@ public class ApiServer : IDisposable
         {
             if (!_radio.Connected)
                 return new { connected = false, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
-            return new { connected = true, freq = _radio.GetFreq(), mode = _radio.GetMode(), vfo = _radio.GetVFO(), power = _radio.GetPower(), tx = _radio.GetTXStatus(), split = _radio.GetSplit(), amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
+            return new { connected = true, freq = _radio.GetFreq(), mode = _radio.GetMode(), vfo = _radio.GetVFO(), power = _radio.GetPower(), tx = _radio.GetTXStatus(), split = _radio.GetSplit(), antenna = _radio.GetAntenna(), amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
         }
 
         // ===== MODE =====
@@ -259,6 +259,13 @@ public class ApiServer : IDisposable
         if (path == "/api/rit/clear") { _radio.ClearRIT(); return OK("action", "clear"); }
         if (path == "/api/xit/on") { _radio.SetXIT(true); return OK("xit", 1); }
         if (path == "/api/xit/off") { _radio.SetXIT(false); return OK("xit", 0); }
+
+        // ===== ANTENNA =====
+        if (path == "/api/antenna") return new { status = "ok", antenna = _radio.GetAntenna() };
+        if (path == "/api/antenna/1") { _radio.SetAntenna(1); return OK("antenna", 1); }
+        if (path == "/api/antenna/2") { _radio.SetAntenna(2); return OK("antenna", 2); }
+        if (path == "/api/antenna/3") { _radio.SetAntenna(3); return OK("antenna", 3); }
+        if (path == "/api/antenna/toggle") { _radio.ToggleAntenna(); return new { status = "ok", antenna = _radio.GetAntenna() }; }
 
         // ===== CW =====
         if (path == "/api/cw-speed/get") return new { status = "ok", wpm = _radio.GetCWSpeed() };

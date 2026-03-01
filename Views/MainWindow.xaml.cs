@@ -38,11 +38,11 @@ public partial class MainWindow : Window
 
     // Connection state tracking for auto-reconnect
     private bool _wasConnected;
-    private DateTime _nextReconnectAttempt = DateTime.MaxValue; // Only reconnect after a drop
+    private DateTime _nextReconnectAttempt = DateTime.MaxValue;
     private bool _reconnecting;
     private static readonly TimeSpan ReconnectInterval = TimeSpan.FromSeconds(5);
 
-    // PTT auto-record state (matching Go: lastPTTState, autoRecordActive, autoRecordTimer, etc.)
+    // PTT auto-record state
     private bool _lastPTTState;
     private bool _autoRecordActive;
     private DateTime _autoRecordTimer;
@@ -53,24 +53,19 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        // Load config
         _config = Config.Load();
 
-        // Init logger
         var logLevel = _config.LogLevel == "debug" ? Services.LogLevel.Debug : Services.LogLevel.Info;
         Logger.Init(logLevel, _config.LogToFile);
         Logger.Info("MAIN", "HamDeck v2.0 (C#) starting");
 
-        // Validate config
         foreach (var err in _config.Validate())
             Logger.Warn("CONFIG", err);
         _config.ApplyDefaults();
 
-        // PTT auto-record seconds (matching Go defaults)
         _autoRecordSeconds = _config.PTTRecordSeconds;
         if (_autoRecordSeconds <= 0) _autoRecordSeconds = 60;
 
-        // Init services
         _radio = new RadioController();
         _recorder = new AudioRecorder(_radio, _config);
         _tgxl = new TgxlTuner(_radio, _config);
@@ -80,7 +75,6 @@ public partial class MainWindow : Window
         _cwKeyer = new CwKeyer(_radio);
         _voiceKeyer = new VoiceKeyer(_radio, _config);
 
-        // FlexKnob - wire up UI callbacks and apply default step
         _flexknob.SetStep(_config.FlexknobDefaultStep);
         _flexknob.OnModeChanged += mode => Dispatcher.Invoke(() =>
         {
@@ -90,7 +84,6 @@ public partial class MainWindow : Window
         _flexknob.OnAction += action => Dispatcher.Invoke(() =>
         {
             FlexKnobAction.Text = action;
-            // Clear after 2 seconds
             Task.Run(async () =>
             {
                 await Task.Delay(2000);
@@ -103,47 +96,37 @@ public partial class MainWindow : Window
             FlexConnBtn.Content = _flexknob.IsConnected ? "Disconnect" : "Connect";
         });
 
-        // Init API server
         _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp);
         if (_config.APIEnabled) _api.Start();
 
-        // Init Wavelog
         _wavelog = new WaveLogServer(_radio, _config);
         _wavelog.Start();
 
-        // Populate port dropdown
         RefreshPorts();
         if (!string.IsNullOrEmpty(_config.RadioPort))
             PortSelect.SelectedItem = _config.RadioPort;
 
-        // Setup update timer (200ms = 5 Hz)
         _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _updateTimer.Tick += UpdateTick;
         _updateTimer.Start();
 
-        // Auto-connect
         Task.Run(AutoConnect);
 
-        // Start ring buffer after delay
         Task.Run(async () =>
         {
             await Task.Delay(2000);
             _recorder.StartBuffer();
         });
 
-        // FlexKnob
         if (_config.FlexknobEnabled)
             Task.Run(async () => { await Task.Delay(1000); _flexknob.Connect(); });
 
-        // DX Cluster
         if (_config.ClusterEnabled)
             Task.Run(async () => { await Task.Delay(3000); _cluster.Connect(); });
 
-        // Handle minimize to tray
         StateChanged += OnStateChanged;
         Closing += OnClosing;
 
-        // Check for silent start
         if (Application.Current.Properties["StartSilent"] is true || _config.StartMinimized)
         {
             WindowState = WindowState.Minimized;
@@ -172,7 +155,7 @@ public partial class MainWindow : Window
             Dispatcher.Invoke(() =>
             {
                 _wasConnected = true;
-                ConnStatus.Text = "● Connected";
+                ConnStatus.Text = "\u25CF Connected";
                 ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
                 ConnectBtn.Content = "Disconnect";
             });
@@ -189,8 +172,8 @@ public partial class MainWindow : Window
         {
             _radio.Disconnect();
             _wasConnected = false;
-            _nextReconnectAttempt = DateTime.MaxValue; // Don't auto-reconnect after manual disconnect
-            ConnStatus.Text = "● Disconnected";
+            _nextReconnectAttempt = DateTime.MaxValue;
+            ConnStatus.Text = "\u25CF Disconnected";
             ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
             ConnectBtn.Content = "Connect";
             return;
@@ -205,7 +188,7 @@ public partial class MainWindow : Window
             _config.RadioPort = port;
             _config.Save();
             _wasConnected = true;
-            ConnStatus.Text = "● Connected";
+            ConnStatus.Text = "\u25CF Connected";
             ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
             ConnectBtn.Content = "Disconnect";
         }
@@ -230,7 +213,7 @@ public partial class MainWindow : Window
                     _config.RadioPort = port;
                     _config.Save();
                     _wasConnected = true;
-                    ConnStatus.Text = "● Connected";
+                    ConnStatus.Text = "\u25CF Connected";
                     ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
                     ConnectBtn.Content = "Disconnect";
                 }
@@ -249,17 +232,15 @@ public partial class MainWindow : Window
     {
         if (!_running) return;
 
-        // ===== DISCONNECTED STATE: detect drop, update UI, attempt reconnect =====
+        // ===== DISCONNECTED STATE =====
         if (!_radio.Connected)
         {
-            // Transition: was connected → now disconnected
             if (_wasConnected)
             {
                 _wasConnected = false;
-                Logger.Warn("RADIO", "Radio disconnected — will auto-reconnect every {0}s", ReconnectInterval.TotalSeconds);
+                Logger.Warn("RADIO", "Radio disconnected \u2014 will auto-reconnect every {0}s", ReconnectInterval.TotalSeconds);
 
-                // Update UI to show disconnected state
-                ConnStatus.Text = "● Disconnected";
+                ConnStatus.Text = "\u25CF Disconnected";
                 ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
                 ConnectBtn.Content = "Connect";
                 TxIndicator.Text = "";
@@ -271,40 +252,32 @@ public partial class MainWindow : Window
                 SMeterLabel.Text = "S0";
                 PowerLabel.Text = "Power: ---";
 
-                // Stop PTT auto-record if active (radio is gone, save what we have)
                 if (_autoRecordActive)
                 {
-                    Logger.Info("RECORD", "Radio lost — saving PTT recording");
+                    Logger.Info("RECORD", "Radio lost \u2014 saving PTT recording");
                     StopPTTRecording();
                 }
                 _lastPTTState = false;
-
-                // Schedule first reconnect attempt
                 _nextReconnectAttempt = DateTime.UtcNow.Add(ReconnectInterval);
             }
 
-            // Auto-reconnect: try periodically on a background thread
             if (!_reconnecting && !string.IsNullOrEmpty(_config.RadioPort)
                 && DateTime.UtcNow >= _nextReconnectAttempt)
             {
                 _reconnecting = true;
                 _nextReconnectAttempt = DateTime.UtcNow.Add(ReconnectInterval);
-
-                ConnStatus.Text = "● Reconnecting...";
+                ConnStatus.Text = "\u25CF Reconnecting...";
                 ConnStatus.Foreground = FindResource("WarningBrush") as SolidColorBrush;
 
                 Task.Run(() =>
                 {
                     try
                     {
-                        // Release stale port handle before reconnecting
-                        // (when radio drops, _port may still be open even though Connected=false)
                         _radio.Disconnect();
-
                         _radio.Connect(_config.RadioPort, _config.RadioBaud);
                         Dispatcher.Invoke(() =>
                         {
-                            ConnStatus.Text = "● Connected";
+                            ConnStatus.Text = "\u25CF Connected";
                             ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
                             ConnectBtn.Content = "Disconnect";
                             _wasConnected = true;
@@ -315,7 +288,7 @@ public partial class MainWindow : Window
                     {
                         Dispatcher.Invoke(() =>
                         {
-                            ConnStatus.Text = "● Disconnected";
+                            ConnStatus.Text = "\u25CF Disconnected";
                             ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
                         });
                     }
@@ -326,27 +299,23 @@ public partial class MainWindow : Window
                 });
             }
 
-            // Still update stats display while disconnected
             StatsLabel.Text = $"Session: {_stats.SessionDuration} | QSY: {_stats.QSYCount} | TX: {_stats.PTTCount} | TX Time: {_stats.TXTimeDisplay}";
             return;
         }
 
-        // Track that we're connected (for detecting future disconnects)
         _wasConnected = true;
 
-        // ===== CONNECTED STATE: normal polling =====
+        // ===== CONNECTED STATE =====
         try
         {
             var freq = _radio.GetFreq();
             if (freq <= 0) return;
 
-            // Format frequency: XX.XXX.XXX
             var mhz = freq / 1_000_000;
             var khz = (freq % 1_000_000) / 1_000;
             var hz = freq % 1_000;
             FreqLabel.Text = $"{mhz:D2}.{khz:D3}.{hz:D3}";
 
-            // VFO-B freq for split display
             if (_radio.GetSplit())
             {
                 var freqB = _radio.GetFreqB();
@@ -363,30 +332,22 @@ public partial class MainWindow : Window
                 SplitIndicator.Text = "";
             }
 
-            // Mode
             var mode = _radio.GetMode();
             ModeLabel.Text = mode;
             if (mode != _lastMode) { _stats.RecordModeChange(mode); _lastMode = mode; }
 
-            // VFO
             VfoLabel.Text = $"VFO-{_radio.GetVFO()}";
 
-            // Get PTT state
             var pttActive = _radio.GetTXStatus();
-
-            // Check if tuner is active (don't trigger auto-record during tuning)
             var tunerActive = _tgxl.IsActive || _amp.IsActive;
 
-            // TX stats tracking (but not during tuning)
             if (!tunerActive)
             {
                 if (pttActive && !_lastPTTState) _stats.RecordTXStart();
                 if (!pttActive && _lastPTTState) _stats.RecordTXEnd();
             }
 
-            // ===== PTT AUTO-RECORD (matching Go main.go lines 832-868) =====
-            // When PTT goes active and auto-record is enabled, start recording.
-            // Each PTT press resets the timer. Recording stops on timeout or QSY.
+            // ===== PTT AUTO-RECORD =====
             if (_config.PTTRecordEnabled && pttActive && !_lastPTTState && !tunerActive)
             {
                 if (!_autoRecordActive)
@@ -395,31 +356,26 @@ public partial class MainWindow : Window
                     _recorder.Start();
                     _autoRecordActive = true;
                     _autoRecordFreq = freq;
-                    RecordBtn.Content = "⏹ Stop";
+                    RecordBtn.Content = "\u23F9 Stop";
                     RecordStatus.Text = "Auto-recording (PTT)";
                     RecordStatus.Foreground = FindResource("WarningBrush") as SolidColorBrush
                                               ?? FindResource("ErrorBrush") as SolidColorBrush;
                 }
-                // Reset timer on each PTT press (keep recording while active QSO)
                 _autoRecordTimer = DateTime.UtcNow.AddSeconds(_autoRecordSeconds);
             }
 
-            // Only update lastPTTState if not tuning (preserve state across tune cycles)
             if (!tunerActive)
                 _lastPTTState = pttActive;
 
-            // Check auto-record timeout or QSY
             if (_autoRecordActive && _autoRecordTimer != default)
             {
                 if (DateTime.UtcNow > _autoRecordTimer)
                 {
-                    // Timer expired - no PTT for N seconds, save the QSO
                     Logger.Info("RECORD", "PTT timer expired, saving QSO");
                     StopPTTRecording();
                 }
                 else if (_autoRecordFreq > 0)
                 {
-                    // Check for QSY (frequency change beyond threshold)
                     var qsyThreshold = (long)_config.PTTQSYThresholdKHz * 1000;
                     if (qsyThreshold <= 0) qsyThreshold = 10000;
                     var freqDiff = Math.Abs(freq - _autoRecordFreq);
@@ -431,10 +387,8 @@ public partial class MainWindow : Window
                 }
             }
 
-            // TX indicator
-            TxIndicator.Text = pttActive ? "● TX" : "";
+            TxIndicator.Text = pttActive ? "\u25CF TX" : "";
 
-            // S-Meter (only when RX)
             if (!pttActive)
             {
                 var smeter = _radio.GetSMeter();
@@ -442,11 +396,9 @@ public partial class MainWindow : Window
                 SMeterLabel.Text = BandHelper.RawToSUnit(smeter);
             }
 
-            // Power
             var power = _radio.GetPower();
             PowerLabel.Text = $"Power: {power}W";
 
-            // Band change tracking
             var band = BandHelper.GetBand(freq);
             if (!string.IsNullOrEmpty(band) && band != _lastBand)
             {
@@ -454,38 +406,32 @@ public partial class MainWindow : Window
                 _lastBand = band;
             }
 
-            // Stats
             StatsLabel.Text = $"Session: {_stats.SessionDuration} | QSY: {_stats.QSYCount} | TX: {_stats.PTTCount} | TX Time: {_stats.TXTimeDisplay}";
 
-            // Ensure connection UI is correct (handles reconnect case)
             if (ConnectBtn.Content.ToString() != "Disconnect")
             {
-                ConnStatus.Text = "● Connected";
+                ConnStatus.Text = "\u25CF Connected";
                 ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
                 ConnectBtn.Content = "Disconnect";
             }
 
-            // FlexKnob connection indicator
             if (_flexknob.IsConnected)
             {
-                FlexKnobStatus.Text = $"● {_config.FlexknobPort} | {_flexknob.ModeName} | Step: {_flexknob.StepDisplay} Hz";
+                FlexKnobStatus.Text = $"\u25CF {_config.FlexknobPort} | {_flexknob.ModeName} | Step: {_flexknob.StepDisplay} Hz";
                 FlexKnobStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
             }
             else if (_config.FlexknobEnabled)
             {
-                FlexKnobStatus.Text = "● Disconnected";
+                FlexKnobStatus.Text = "\u25CF Disconnected";
                 FlexKnobStatus.Foreground = FindResource("DimTextBrush") as SolidColorBrush;
             }
 
-            // Recording time display
             if (_recorder.IsRecording)
             {
                 var status = _recorder.GetStatus();
                 var elapsed = (double)status["duration"];
-
                 if (_autoRecordActive && _autoRecordTimer != default)
                 {
-                    // Show countdown for PTT auto-record
                     var remaining = (_autoRecordTimer - DateTime.UtcNow).TotalSeconds;
                     if (remaining > 0)
                         RecordTime.Text = $"{elapsed:F0}s (-{remaining:F0}s)";
@@ -496,8 +442,7 @@ public partial class MainWindow : Window
                 {
                     RecordTime.Text = $"{elapsed:F0}s";
                 }
-
-                RecordBtn.Content = "⏹ Stop";
+                RecordBtn.Content = "\u23F9 Stop";
                 if (!_autoRecordActive)
                 {
                     RecordStatus.Text = "Recording...";
@@ -508,7 +453,7 @@ public partial class MainWindow : Window
             {
                 if (!_autoRecordActive)
                 {
-                    RecordBtn.Content = "⏺ Record";
+                    RecordBtn.Content = "\u23FA Record";
                     RecordStatus.Text = _recorder.IsBuffering ? "Buffer ready" : "Buffer off";
                     RecordStatus.Foreground = FindResource("DimTextBrush") as SolidColorBrush;
                     RecordTime.Text = "";
@@ -523,10 +468,9 @@ public partial class MainWindow : Window
 
     // ========== PTT AUTO-RECORD HELPERS ==========
 
-    /// <summary>Stop PTT auto-recording and save as QSO file (matching Go stopPTTRecording)</summary>
     private void StopPTTRecording()
     {
-        RecordBtn.Content = "⏺ Record";
+        RecordBtn.Content = "\u23FA Record";
         RecordStatus.Text = "Saving QSO...";
         RecordStatus.Foreground = FindResource("DimTextBrush") as SolidColorBrush;
 
@@ -534,11 +478,9 @@ public partial class MainWindow : Window
         _autoRecordTimer = default;
         _stats.RecordQSO();
 
-        // Build date-organized path: PTTRecordPath/2026-01/2026-01-15/
         var pttBasePath = !string.IsNullOrEmpty(_config.PTTRecordPath)
             ? _config.PTTRecordPath
             : Config.DefaultPTTRecordPath;
-
         var now = DateTime.UtcNow;
         var monthFolder = now.ToString("yyyy-MM");
         var dateFolder = now.ToString("yyyy-MM-dd");
@@ -558,7 +500,6 @@ public partial class MainWindow : Window
 
         RecordTime.Text = "";
 
-        // Clear status after 3 seconds
         Task.Run(async () =>
         {
             await Task.Delay(3000);
@@ -629,7 +570,9 @@ public partial class MainWindow : Window
     private void ToggleATT_Click(object s, RoutedEventArgs e) { var c = _radio.GetATT(); _radio.SetATT(!c); }
     private void ToggleLock_Click(object s, RoutedEventArgs e) { var c = _radio.GetLock(); _radio.SetLock(!c); }
     private void ToggleAntenna_Click(object s, RoutedEventArgs e) => _radio.ToggleAntenna();
-
+    private void Ant1_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(1);
+    private void Ant2_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(2);
+    private void RxAnt_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(3);
     private void CycleAGC_Click(object s, RoutedEventArgs e)
     {
         var current = _radio.GetAGC();
@@ -693,13 +636,11 @@ public partial class MainWindow : Window
 
     private void RecordToggle_Click(object s, RoutedEventArgs e)
     {
-        // If PTT auto-record is active, stop it
         if (_autoRecordActive)
         {
             StopPTTRecording();
             return;
         }
-
         if (_recorder.IsRecording) _recorder.Stop();
         else _recorder.Start();
     }
@@ -713,16 +654,14 @@ public partial class MainWindow : Window
 
     private void OpenRecordFolder_Click(object s, RoutedEventArgs e)
     {
-        // Open whichever recording folder exists - prefer QSO path, fall back to record path
         var qsoPath = !string.IsNullOrEmpty(_config.PTTRecordPath)
             ? _config.PTTRecordPath : Config.DefaultPTTRecordPath;
         var recPath = !string.IsNullOrEmpty(_config.RecordPath)
             ? _config.RecordPath : Config.DefaultRecordPath;
 
-        // Try QSO path first, then recording path
         var pathToOpen = Directory.Exists(qsoPath) ? qsoPath
                        : Directory.Exists(recPath) ? recPath
-                       : qsoPath; // Create QSO path if neither exists
+                       : qsoPath;
 
         Directory.CreateDirectory(pathToOpen);
         System.Diagnostics.Process.Start("explorer.exe", pathToOpen);
@@ -758,7 +697,6 @@ public partial class MainWindow : Window
             _clusterWindow.Activate();
             return;
         }
-
         _clusterWindow = new DxClusterWindow(_cluster, _radio, _config) { Owner = this };
         _clusterWindow.Closed += (s, a) => _clusterWindow = null;
         _clusterWindow.Show();
@@ -821,7 +759,6 @@ public partial class MainWindow : Window
             Hide();
             return;
         }
-
         _running = false;
         Cleanup();
     }

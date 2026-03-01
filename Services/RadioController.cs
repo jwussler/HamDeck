@@ -453,7 +453,7 @@ public class RadioController : IDisposable
         return 1;
     }
 
-    public void SetAntenna(int ant) => Send($"AN0{Math.Clamp(ant, 1, 2)};", false);
+    public void SetAntenna(int ant) => Send($"AN0{Math.Clamp(ant, 1, 3)};", false);
     public void ToggleAntenna() => SetAntenna(GetAntenna() == 1 ? 2 : 1);
 
     // ========== PORT DETECTION ==========
