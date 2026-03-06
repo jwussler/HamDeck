@@ -446,6 +446,7 @@ public class RadioController : IDisposable
     public void RecallMemory(int num) => Send($"MC{num:D3};", false);
     public void SetWidth(int w) => Send($"SH0{w:D2};", false);
 
+    /// <summary>Get TX antenna port (1=ANT1, 2=ANT2). CAT: AN0;</summary>
     public int GetAntenna()
     {
         var resp = Send("AN0;");
@@ -453,8 +454,21 @@ public class RadioController : IDisposable
         return 1;
     }
 
+    /// <summary>Set TX antenna port (1=ANT1, 2=ANT2). CAT: AN01; / AN02;</summary>
     public void SetAntenna(int ant) => Send($"AN0{Math.Clamp(ant, 1, 3)};", false);
+
+    /// <summary>Toggle TX antenna between ANT1 and ANT2.</summary>
     public void ToggleAntenna() => SetAntenna(GetAntenna() == 1 ? 2 : 1);
+
+    /// <summary>Get RX antenna input state. CAT: AN1; returns AN10; (off) or AN11; (on)</summary>
+    public bool GetRxAntenna()
+    {
+        var resp = Send("AN1;");
+        return resp.StartsWith("AN1") && resp.Length >= 4 && resp[3] == '1';
+    }
+
+    /// <summary>Enable or disable RX ANT input. CAT: AN11; (on) / AN10; (off)</summary>
+    public void SetRxAntenna(bool useRxAnt) => Send(useRxAnt ? "AN11;" : "AN10;", false);
 
     // ========== PORT DETECTION ==========
 

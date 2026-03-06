@@ -21,18 +21,20 @@ public class ApiServer : IDisposable
     private readonly TgxlTuner _tgxl;
     private readonly AmpTuner _amp;
     private readonly Config _config;
+    private readonly KmtronicService? _kmtronic;
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private string _freqBuffer = "";
 
     public ApiServer(RadioController radio, AudioRecorder recorder, Config config,
-                     TgxlTuner tgxl, AmpTuner amp)
+                     TgxlTuner tgxl, AmpTuner amp, KmtronicService? kmtronic = null)
     {
         _radio = radio;
         _recorder = recorder;
         _config = config;
         _tgxl = tgxl;
         _amp = amp;
+        _kmtronic = kmtronic;
     }
 
     public void Start()
@@ -49,7 +51,6 @@ public class ApiServer : IDisposable
         }
         catch (HttpListenerException ex)
         {
-            // Fallback to localhost only if + prefix fails (no admin rights)
             Logger.Warn("API", "Binding to all interfaces failed ({0}), trying localhost...", ex.Message);
             _listener = new HttpListener();
             _listener.Prefixes.Add($"http://localhost:{_config.APIPort}/");
@@ -90,7 +91,6 @@ public class ApiServer : IDisposable
 
     private object? Route(string path)
     {
-        // Strip trailing slash for matching
         path = path.TrimEnd('/');
 
         // ===== INDEX / HEALTH =====
@@ -103,7 +103,7 @@ public class ApiServer : IDisposable
         {
             if (!_radio.Connected)
                 return new { connected = false, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
-            return new { connected = true, freq = _radio.GetFreq(), mode = _radio.GetMode(), vfo = _radio.GetVFO(), power = _radio.GetPower(), tx = _radio.GetTXStatus(), split = _radio.GetSplit(), antenna = _radio.GetAntenna(), amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
+            return new { connected = true, freq = _radio.GetFreq(), mode = _radio.GetMode(), vfo = _radio.GetVFO(), power = _radio.GetPower(), tx = _radio.GetTXStatus(), split = _radio.GetSplit(), ant = _radio.GetAntenna(), rxant = _radio.GetRxAntenna(), amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
         }
 
         // ===== MODE =====
@@ -260,13 +260,6 @@ public class ApiServer : IDisposable
         if (path == "/api/xit/on") { _radio.SetXIT(true); return OK("xit", 1); }
         if (path == "/api/xit/off") { _radio.SetXIT(false); return OK("xit", 0); }
 
-        // ===== ANTENNA =====
-        if (path == "/api/antenna") return new { status = "ok", antenna = _radio.GetAntenna() };
-        if (path == "/api/antenna/1") { _radio.SetAntenna(1); return OK("antenna", 1); }
-        if (path == "/api/antenna/2") { _radio.SetAntenna(2); return OK("antenna", 2); }
-        if (path == "/api/antenna/3") { _radio.SetAntenna(3); return OK("antenna", 3); }
-        if (path == "/api/antenna/toggle") { _radio.ToggleAntenna(); return new { status = "ok", antenna = _radio.GetAntenna() }; }
-
         // ===== CW =====
         if (path == "/api/cw-speed/get") return new { status = "ok", wpm = _radio.GetCWSpeed() };
         if (path == "/api/cw-speed/up") { var w = _radio.GetCWSpeed(); _radio.SetCWSpeed(w + 2); return OK("wpm", w + 2); }
@@ -298,6 +291,28 @@ public class ApiServer : IDisposable
         // ===== LOCK =====
         if (path == "/api/lock/on") { _radio.SetLock(true); return OK("lock", 1); }
         if (path == "/api/lock/off") { _radio.SetLock(false); return OK("lock", 0); }
+
+        // ===== TX ANTENNA (ANT1/ANT2 ports) =====
+        if (path == "/api/ant/1") { _radio.SetAntenna(1); return OK("ant", 1); }
+        if (path == "/api/ant/2") { _radio.SetAntenna(2); return OK("ant", 2); }
+        if (path == "/api/ant/3") { _radio.SetAntenna(3); return OK("ant", 3); }
+        if (path == "/api/ant/toggle") { _radio.ToggleAntenna(); return OK("ant", _radio.GetAntenna()); }
+        if (path == "/api/ant/get") return new { status = "ok", ant = _radio.GetAntenna() };
+
+        // ===== RX ANTENNA INPUT =====
+        if (path == "/api/ant/rx/on") { _radio.SetRxAntenna(true); return OK("rxant", 1); }
+        if (path == "/api/ant/rx/off") { _radio.SetRxAntenna(false); return OK("rxant", 0); }
+        if (path == "/api/ant/rx/toggle") { var c = _radio.GetRxAntenna(); _radio.SetRxAntenna(!c); return OK("rxant", !c); }
+        if (path == "/api/ant/rx/get") return new { status = "ok", rxant = _radio.GetRxAntenna() };
+
+        // ===== KMTRONIC RX ANTENNA RELAY =====
+        if (path.StartsWith("/api/rxant/") && _kmtronic != null)
+        {
+            var seg = path["/api/rxant/".Length..];
+            if (seg == "get") return new { status = "ok", rxant = _kmtronic.ActiveAntenna };
+            if (int.TryParse(seg, out var rxant) && rxant >= 1 && rxant <= 4)
+            { _kmtronic.SetAntenna(rxant); return OK("rxant", rxant); }
+        }
 
         return null;
     }
