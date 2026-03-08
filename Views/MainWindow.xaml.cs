@@ -391,13 +391,15 @@ public partial class MainWindow : Window
             if (proxyActive)
             {
                 // ── Proxy-fed: use cached values (no serial I/O) ──
+                // N1MM polls FA/FB/FT/IF/AG0 etc. but NOT TX or SM0,
+                // so we still query those directly (2 quick commands).
                 freq = _radio.LastFrequency;
                 if (freq <= 0) return;
                 split = _radio.LastSplit;
                 mode = _radio.LastMode;
                 vfo = _radio.LastVFO;
-                pttActive = _radio.LastTXState;
-                smeter = _radio.LastSMeter;
+                pttActive = _radio.GetTXStatus();
+                smeter = !pttActive ? _radio.GetSMeter() : 0;
                 power = _radio.LastPower;
             }
             else
