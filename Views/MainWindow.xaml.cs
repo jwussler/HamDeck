@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Ports;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -54,6 +55,14 @@ public partial class MainWindow : Window
     private DateTime _autoRecordTimer;
     private int _autoRecordSeconds;
     private long _autoRecordFreq;
+
+    // v3: All GUI buttons route through the API so behavior matches Stream Deck
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(2) };
+    private void Api(string path) => Task.Run(async () =>
+    {
+        try { await _http.GetAsync($"http://localhost:{_config.APIPort}{path}"); }
+        catch (Exception ex) { Logger.Debug("API-UI", "Call failed: {0} — {1}", path, ex.Message); }
+    });
 
     public MainWindow()
     {
@@ -575,16 +584,10 @@ public partial class MainWindow : Window
 
     // ========== BAND ==========
 
-    private async void Band_Click(object sender, RoutedEventArgs e)
+    private void Band_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.Tag is string band)
-        {
-            if (!BandHelper.BandFrequencies.TryGetValue(band, out var freq)) return;
-            var mode = BandHelper.GetModeForFrequency(freq);
-            _radio.SetFreq(freq);
-            await Task.Delay(100);
-            _radio.SetMode(mode);
-        }
+            Api($"/api/band/{band}");
     }
 
     // ========== MODE ==========
@@ -592,57 +595,47 @@ public partial class MainWindow : Window
     private void Mode_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.Tag is string mode)
-            _radio.SetMode(mode);
+            Api($"/api/mode/{mode.ToLower()}");
     }
 
     // ========== VFO ==========
 
-    private void VfoA_Click(object s, RoutedEventArgs e) => _radio.SetVFO("A");
-    private void VfoB_Click(object s, RoutedEventArgs e) => _radio.SetVFO("B");
-    private void VfoSwap_Click(object s, RoutedEventArgs e) => _radio.SwapVFO();
-    private void VfoCopyAB_Click(object s, RoutedEventArgs e) => _radio.CopyVFO("A", "B");
-    private void SplitToggle_Click(object s, RoutedEventArgs e)
-    { var c = _radio.GetSplit(); _radio.SetSplit(!c); }
+    private void VfoA_Click(object s, RoutedEventArgs e) => Api("/api/vfo/a");
+    private void VfoB_Click(object s, RoutedEventArgs e) => Api("/api/vfo/b");
+    private void VfoSwap_Click(object s, RoutedEventArgs e) => Api("/api/vfo/swap");
+    private void VfoCopyAB_Click(object s, RoutedEventArgs e) => Api("/api/vfo-copy/a2b");
+    private void SplitToggle_Click(object s, RoutedEventArgs e) => Api("/api/split/toggle");
 
     // ========== POWER ==========
 
     private void Power_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button btn && btn.Tag is string watts && int.TryParse(watts, out var w))
-            _radio.SetPower(w);
+        if (sender is Button btn && btn.Tag is string watts)
+            Api($"/api/power/set/{watts}");
     }
 
     // ========== TUNERS ==========
 
-    private void Tune_Click(object s, RoutedEventArgs e) => _radio.StartTune();
-    private void TgxlTune_Click(object s, RoutedEventArgs e) => _tgxl.Tune();
-    private void AmpTune_Click(object s, RoutedEventArgs e) => _amp.Tune();
+    private void Tune_Click(object s, RoutedEventArgs e) => Api("/api/tune");
+    private void TgxlTune_Click(object s, RoutedEventArgs e) => Api("/api/tune/tgxl");
+    private void AmpTune_Click(object s, RoutedEventArgs e) => Api("/api/tune/amp");
 
     // ========== FILTERS ==========
 
-    private void ToggleNB_Click(object s, RoutedEventArgs e) { var c = _radio.GetNB(); _radio.SetNB(!c); }
-    private void ToggleNR_Click(object s, RoutedEventArgs e) { var c = _radio.GetNR(); _radio.SetNR(!c); }
-    private void ToggleNotch_Click(object s, RoutedEventArgs e) { var c = _radio.GetNotch(); _radio.SetNotch(!c); }
-    private void ToggleVOX_Click(object s, RoutedEventArgs e) { var c = _radio.GetVOX(); _radio.SetVOX(!c); }
-    private void ToggleComp_Click(object s, RoutedEventArgs e) { var c = _radio.GetComp(); _radio.SetComp(!c); }
-    private void CyclePreamp_Click(object s, RoutedEventArgs e) => _radio.CyclePreamp();
-    private void ToggleATT_Click(object s, RoutedEventArgs e) { var c = _radio.GetATT(); _radio.SetATT(!c); }
-    private void ToggleLock_Click(object s, RoutedEventArgs e) { var c = _radio.GetLock(); _radio.SetLock(!c); }
-    private void ToggleAntenna_Click(object s, RoutedEventArgs e) => _radio.ToggleAntenna();
-    private void Ant1_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(1);
-    private void Ant2_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(2);
-    private void RxAnt_Click(object s, RoutedEventArgs e)
-    { var cur = _radio.GetAntenna(); _radio.SetAntenna(cur == 3 ? 1 : 3); }
+    private void ToggleNB_Click(object s, RoutedEventArgs e) => Api("/api/toggle/nb");
+    private void ToggleNR_Click(object s, RoutedEventArgs e) => Api("/api/toggle/nr");
+    private void ToggleNotch_Click(object s, RoutedEventArgs e) => Api("/api/toggle/notch");
+    private void ToggleVOX_Click(object s, RoutedEventArgs e) => Api("/api/vox/toggle");
+    private void ToggleComp_Click(object s, RoutedEventArgs e) => Api("/api/comp/toggle");
+    private void CyclePreamp_Click(object s, RoutedEventArgs e) => Api("/api/preamp/cycle");
+    private void ToggleATT_Click(object s, RoutedEventArgs e) => Api("/api/att/toggle");
+    private void ToggleLock_Click(object s, RoutedEventArgs e) => Api("/api/toggle/lock");
+    private void ToggleAntenna_Click(object s, RoutedEventArgs e) => Api("/api/ant/toggle");
+    private void Ant1_Click(object s, RoutedEventArgs e) => Api("/api/ant/1");
+    private void Ant2_Click(object s, RoutedEventArgs e) => Api("/api/ant/2");
+    private void RxAnt_Click(object s, RoutedEventArgs e) => Api("/api/rxant/cycle");
 
-    private void CycleAGC_Click(object s, RoutedEventArgs e)
-    {
-        var current = _radio.GetAGC();
-        var next = current switch
-        {
-            "FAST" => "MID", "MID" => "SLOW", "SLOW" => "AUTO", "AUTO" => "OFF", _ => "FAST"
-        };
-        _radio.SetAGC(next);
-    }
+    private void CycleAGC_Click(object s, RoutedEventArgs e) => Api("/api/agc/cycle");
 
     // ========== FLEXKNOB ==========
 
@@ -671,11 +664,7 @@ public partial class MainWindow : Window
         FlexModeBtn.Content = _flexknob.ModeName;
     }
 
-    private void FlexClearRIT_Click(object s, RoutedEventArgs e)
-    {
-        _radio.ClearRIT();
-        Logger.Info("FLEXKNOB", "RIT cleared from UI");
-    }
+    private void FlexClearRIT_Click(object s, RoutedEventArgs e) => Api("/api/rit/clear");
 
     private void FlexConnect_Click(object s, RoutedEventArgs e)
     {
@@ -740,9 +729,7 @@ public partial class MainWindow : Window
         var hz = FrequencyHelper.Parse(FreqEntry.Text);
         if (hz > 0)
         {
-            var mode = BandHelper.GetModeForFrequency(hz);
-            _radio.SetMode(mode);
-            _radio.SetFreq(hz);
+            Api($"/api/freq/set/{hz}");
             FreqEntry.Clear();
         }
     }
