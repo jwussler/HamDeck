@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HamDeck — WA0O</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <h1>HamDeck</h1>
+            <span class="callsign">WA0O</span>
+        </div>
+        <div class="header-right">
+            <span id="connection-badge" class="badge badge-offline">OFFLINE</span>
+            <span id="clock" class="clock"></span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Row 1: Frequency + Radio Status -->
+        <section class="card card-freq">
+            <div class="card-label">FREQUENCY</div>
+            <div id="freq-display" class="freq-display">—</div>
+            <div class="freq-meta">
+                <span id="band-badge" class="badge badge-band">—</span>
+                <span id="mode-badge" class="badge badge-mode">—</span>
+                <span id="vfo-badge" class="badge badge-vfo">VFO A</span>
+                <span id="split-badge" class="badge badge-split badge-hidden">SPLIT</span>
+                <span id="tx-badge" class="badge badge-tx badge-hidden">TX</span>
+            </div>
+        </section>
+
+        <section class="card card-radio">
+            <div class="card-label">RADIO</div>
+            <div class="radio-grid">
+                <div class="radio-item">
+                    <span class="radio-key">Power</span>
+                    <span id="power-val" class="radio-val">—</span>
+                </div>
+                <div class="radio-item">
+                    <span class="radio-key">Antenna</span>
+                    <span id="ant-val" class="radio-val">—</span>
+                </div>
+                <div class="radio-item">
+                    <span class="radio-key">RX Ant</span>
+                    <span id="rxant-val" class="radio-val">—</span>
+                </div>
+                <div class="radio-item">
+                    <span class="radio-key">ATU</span>
+                    <span id="atu-val" class="radio-val">—</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Row 2: Meters -->
+        <section class="card card-meters">
+            <div class="card-label">METERS</div>
+            <div class="meters-grid">
+                <div class="meter">
+                    <div class="meter-label">S-METER</div>
+                    <div class="meter-bar-track">
+                        <div id="smeter-bar" class="meter-bar meter-bar-signal" style="width: 0%"></div>
+                    </div>
+                    <div id="smeter-val" class="meter-value">S0</div>
+                </div>
+                <div class="meter">
+                    <div class="meter-label">POWER</div>
+                    <div class="meter-bar-track">
+                        <div id="power-bar" class="meter-bar meter-bar-power" style="width: 0%"></div>
+                    </div>
+                    <div id="power-meter-val" class="meter-value">0W</div>
+                </div>
+                <div class="meter">
+                    <div class="meter-label">SWR</div>
+                    <div class="meter-bar-track">
+                        <div id="swr-bar" class="meter-bar meter-bar-swr" style="width: 0%"></div>
+                    </div>
+                    <div id="swr-val" class="meter-value">1.0</div>
+                </div>
+                <div class="meter">
+                    <div class="meter-label">ALC</div>
+                    <div class="meter-bar-track">
+                        <div id="alc-bar" class="meter-bar meter-bar-alc" style="width: 0%"></div>
+                    </div>
+                    <div id="alc-val" class="meter-value">0</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Row 3: Session + Recording -->
+        <section class="card card-session">
+            <div class="card-label">SESSION</div>
+            <div class="session-grid">
+                <div class="session-item">
+                    <span class="session-key">Recording</span>
+                    <span id="rec-status" class="rec-indicator rec-off">OFF</span>
+                </div>
+                <div class="session-item">
+                    <span class="session-key">TX Count</span>
+                    <span id="tx-count" class="session-val">—</span>
+                </div>
+                <div class="session-item">
+                    <span class="session-key">TX Time</span>
+                    <span id="tx-time" class="session-val">—</span>
+                </div>
+                <div class="session-item">
+                    <span class="session-key">QSY Count</span>
+                    <span id="qsy-count" class="session-val">—</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Row 4: DX Cluster -->
+        <section class="card card-cluster">
+            <div class="card-label">DX CLUSTER</div>
+            <div class="cluster-scroll">
+                <table class="cluster-table">
+                    <thead>
+                        <tr>
+                            <th>Freq</th>
+                            <th>DX Call</th>
+                            <th>DXCC</th>
+                            <th>Spotter</th>
+                            <th>Comment</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cluster-body">
+                        <tr class="cluster-empty"><td colspan="6">Waiting for spots...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <span>HamDeck v2.0 — 73 de WA0O</span>
+    </footer>
+
+    
+    <script src="app.js"></script>
+</body>
+</html>

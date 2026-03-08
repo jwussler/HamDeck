@@ -134,7 +134,7 @@ public partial class MainWindow : Window
             FlexConnBtn.Content = _flexknob.IsConnected ? "Disconnect" : "Connect";
         });
 
-        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic);
+        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, _cluster, _stats);
         if (_config.APIEnabled) _api.Start();
 
         // TCP CAT Proxy for N1MM and external loggers

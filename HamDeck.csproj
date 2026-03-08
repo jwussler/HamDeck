@@ -26,4 +26,8 @@
     <Resource Include="Resources\hamdeck.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
