@@ -324,13 +324,19 @@ public class RadioController : IDisposable
         Send($"FA{hz:D9};", false);
     }
 
-    /// <summary>Step frequency using cached value — no radio query, fire-and-forget for knob speed</summary>
+    /// <summary>Step frequency using cached value — no radio query, fire-and-forget for knob speed.
+    /// Snaps to the nearest step boundary in the turn direction so the frequency stays clean.</summary>
     public void StepFreq(long stepHz)
     {
         var f = LastFrequency;
         if (f <= 0) f = GetFreq();
         if (f <= 0) return;
-        var newFreq = f + stepHz;
+        var absStep = Math.Abs(stepHz);
+        long newFreq;
+        if (stepHz > 0)
+            newFreq = ((f / absStep) + 1) * absStep;   // snap up to next boundary
+        else
+            newFreq = ((f - 1) / absStep) * absStep;   // snap down to prev boundary
         LastFrequency = newFreq;
         SetFreq(newFreq);
     }
