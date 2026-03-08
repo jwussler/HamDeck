@@ -25,51 +25,58 @@ Extract the zip to any folder and run `HamDeck.exe` directly. Right-click the zi
 ## Features
 
 ### Radio Control
-- Full CAT command set for the FTDX-101MP over serial (38400 baud, 8N2)
-- Band, mode, VFO, power, split, and filter controls from the GUI
-- S-meter, power meter, SWR, and ALC readback
-- Antenna switching (ANT 1/2/3, RX ANT)
-- Preamp, attenuator, AGC, NB, NR, notch, VOX, compressor controls
-- RIT/XIT with offset adjustment
-- CW speed, pitch, break-in, and memory keyer
-- Dial lock
+
+* Full CAT command set for the FTDX-101MP over serial (38400 baud, 8N2)
+* Band, mode, VFO, power, split, and filter controls from the GUI
+* S-meter, power meter, SWR, and ALC readback
+* Antenna switching (ANT 1/2/3, RX ANT)
+* Preamp, attenuator, AGC, NB, NR, notch, VOX, compressor controls
+* RIT/XIT with offset adjustment
+* CW speed, pitch, break-in, and memory keyer
+* Dial lock
 
 ### TCP CAT Proxy (N1MM / Logger Integration)
-- Exposes the radio's CAT port over TCP on `localhost:4532`
-- Allows N1MM, Log4OM, or any CAT-over-TCP client to share the radio without virtual serial port splitters
-- Proxy responses are parsed in real-time to keep the HamDeck GUI updated — zero UI stall even under heavy external polling
+
+* Exposes the radio's CAT port over TCP on `localhost:4532`
+* Allows N1MM, Log4OM, or any CAT-over-TCP client to share the radio without virtual serial port splitters
+* Proxy responses are parsed in real-time to keep the HamDeck GUI updated — zero UI stall even under heavy external polling
 
 ### FlexKnob USB Controller
-- USB rotary encoder support for hands-on VFO tuning, volume, and RIT
-- Frequency snaps to clean step boundaries (10/50/100/500/1k/5k/10k Hz)
-- Mode cycling and step size adjustment via button presses
-- Supports both FlexKnob native protocol and legacy encoder protocol
+
+* USB rotary encoder support for hands-on VFO tuning, volume, and RIT
+* Frequency snaps to clean step boundaries (10/50/100/500/1k/5k/10k Hz)
+* Mode cycling and step size adjustment via button presses
+* Supports both FlexKnob native protocol and legacy encoder protocol
 
 ### DX Cluster
-- Polls the WA0O JSON spot API with configurable interval
-- Band/mode/continent filtering with auto-band tracking
-- Double-click-to-tune with automatic mode setting
-- DXCC entity and flag display
+
+* Polls the WA0O JSON spot API with configurable interval
+* Band/mode/continent filtering with auto-band tracking
+* Double-click-to-tune with automatic mode setting
+* DXCC entity and flag display
 
 ### Audio Recording
-- PTT-triggered auto-record with configurable timeout
-- Ring buffer for lookback capture (catch the start of a QSO you forgot to record)
-- QSY detection auto-saves when you change frequency mid-recording
-- Organized file storage by date
-- Manual record/stop and instant replay via GUI or API
+
+* PTT-triggered auto-record with configurable timeout
+* Ring buffer for lookback capture (catch the start of a QSO you forgot to record)
+* QSY detection auto-saves when you change frequency mid-recording
+* Organized file storage by date
+* Manual record/stop and instant replay via GUI or API
 
 ### Wavelog Integration
-- Real-time frequency/mode/power updates to Wavelog via REST API
-- Click-to-tune HTTP server on port 54321 — click a log entry in Wavelog and the radio tunes
-- WebSocket server on port 54322 for live push updates
+
+* Real-time frequency/mode/power updates to Wavelog via REST API
+* Click-to-tune HTTP server on port 54321 — click a log entry in Wavelog and the radio tunes
+* WebSocket server on port 54322 for live push updates
 
 ### REST API (Port 5001)
+
 Over 100 endpoints for complete remote control. Compatible with Stream Deck (via API Ninja plugin), automation scripts, and custom integrations.
 
 Key endpoint groups:
 
 | Group | Endpoints | Description |
-|---|---|---|
+| --- | --- | --- |
 | Status | `/api/status`, `/api/health`, `/api/meters` | Radio state, S-meter, SWR, ALC |
 | Frequency | `/api/freq/{digit}`, `/api/freq/send`, `/api/freq/get` | Digit-by-digit entry (Stream Deck numpad) |
 | Band | `/api/band/{160m-6m}` | Direct band selection |
@@ -88,19 +95,22 @@ Key endpoint groups:
 | Presets | `/api/preset/{40cw,40ssb,20cw,20ssb,...}` | Quick band/mode combos |
 
 ### Tuner Support
-- **Internal ATU** — one-click tune via CAT
-- **TG-XL** — network-controlled remote antenna tuner
-- **Amp Tune** — automated amplifier tune cycle (configurable power/duration)
+
+* **Internal ATU** — one-click tune via CAT
+* **TG-XL** — network-controlled remote antenna tuner
+* **Amp Tune** — automated amplifier tune cycle (configurable power/duration)
 
 ### KMTronic Relay Control
-- Network-controlled relay board for RX antenna switching
-- Cycle through antenna ports via API or GUI
+
+* Network-controlled relay board for RX antenna switching
+* Cycle through antenna ports via API or GUI
 
 ### System Integration
-- Auto-connect on startup
-- Minimize to system tray with proper exit handling
-- Auto-reconnect on radio disconnect
-- Session statistics (QSY count, TX count, TX time)
+
+* Auto-connect on startup
+* Minimize to system tray with proper exit handling
+* Auto-reconnect on radio disconnect
+* Session statistics (QSY count, TX count, TX time)
 
 ## N1MM Setup
 
@@ -119,7 +129,7 @@ Key endpoint groups:
 All settings are in `%USERPROFILE%\.hamdeck\config.json` and editable via the Settings dialog.
 
 | Setting | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `radio_port` | — | COM port for FTDX-101MP |
 | `radio_baud` | 38400 | Serial baud rate |
 | `api_port` | 5001 | REST API listen port |
@@ -182,4 +192,4 @@ HamDeck/
 
 ## License
 
-MIT License � see [LICENSE](LICENSE) for details. 73 de WA0O!
+MIT License — see [LICENSE](LICENSE) for details. 73 de WA0O!
