@@ -20,12 +20,21 @@ public class RadioController : IDisposable
     public string LastMode { get; private set; } = "";
     public int LastPower { get; private set; }
 
-    /// <summary>Last cached TX/PTT state — updated by GetTXStatus().
-    /// WaveLogServer reads this to avoid redundant serial queries during broadcasts.</summary>
+    /// <summary>Last cached TX/PTT state — updated by GetTXStatus() and proxy traffic.</summary>
     public bool LastTXState { get; private set; }
 
-    /// <summary>Timestamp of last proxy command — polling suppresses itself briefly after proxy activity</summary>
+    // Cached values populated by proxy traffic so the UI can update without serial queries
+    public long LastFreqB { get; private set; }
+    public bool LastSplit { get; private set; }
+    public string LastVFO { get; private set; } = "A";
+    public int LastSMeter { get; private set; }
+    public int LastAFGain { get; private set; }
+
+    /// <summary>Timestamp of last proxy command — UI uses cached values while proxy is active</summary>
     public long LastProxyActivityMs { get; private set; }
+
+    /// <summary>True when a proxy client has been active within the last 500ms</summary>
+    public bool ProxyIsActive => Environment.TickCount64 - LastProxyActivityMs < 500;
 
     // ========== CONNECTION ==========
 
@@ -165,6 +174,8 @@ public class RadioController : IDisposable
     /// <summary>
     /// Public bridge used by TcpCatProxy to route raw CAT commands through the serial lock.
     /// Uses an explicit list of Yaesu query commands so set commands are always fire-and-forget.
+    /// Parses responses to update cached properties so the UI can display live data
+    /// without competing for the serial lock.
     /// </summary>
     public string SendRaw(string cmd)
     {
@@ -196,10 +207,88 @@ public class RadioController : IDisposable
             upper == "SD;"  || upper == "SY;" || upper == "DA;" ||
             upper == "MC;"  || upper == "MS;";
 
-        // Mark proxy activity so the UI polling loop yields briefly
+        // Mark proxy activity so the UI switches to cached-value mode
         LastProxyActivityMs = Environment.TickCount64;
 
-        return Send(cmd, isQuery);
+        string response = Send(cmd, isQuery);
+
+        // Parse response to keep cached properties current for the UI
+        if (!string.IsNullOrEmpty(response))
+            UpdateCacheFromResponse(response);
+
+        return response;
+    }
+
+    /// <summary>
+    /// Parse a CAT response and update cached properties.
+    /// Called from SendRaw so proxy traffic keeps the UI fed with live data.
+    /// </summary>
+    private void UpdateCacheFromResponse(string resp)
+    {
+        try
+        {
+            if (resp.StartsWith("FA") && resp.Length >= 11 &&
+                long.TryParse(resp[2..11], out var freqA))
+            {
+                LastFrequency = freqA;
+                _failCount = 0;
+            }
+            else if (resp.StartsWith("FB") && resp.Length >= 11 &&
+                     long.TryParse(resp[2..11], out var freqB))
+            {
+                LastFreqB = freqB;
+            }
+            else if (resp.StartsWith("MD0") && resp.Length >= 4 &&
+                     ModeMap.TryGetValue(resp[3], out var mode))
+            {
+                LastMode = mode;
+            }
+            else if (resp.StartsWith("TX") && resp.Length >= 3)
+            {
+                LastTXState = resp[2] != '0';
+            }
+            else if (resp.StartsWith("ST") && resp.Length >= 3)
+            {
+                LastSplit = resp[2] == '1';
+            }
+            else if (resp.StartsWith("FT") && resp.Length >= 3)
+            {
+                // FT (TX VFO select) — FT1 means TX on sub VFO = split active
+                LastSplit = resp[2] != '0';
+            }
+            else if (resp.StartsWith("VS") && resp.Length >= 3)
+            {
+                LastVFO = resp[2] == '0' ? "A" : "B";
+            }
+            else if (resp.StartsWith("SM0") && resp.Length >= 6 &&
+                     int.TryParse(resp[3..6], out var smeter))
+            {
+                LastSMeter = smeter;
+            }
+            else if (resp.StartsWith("PC") && resp.Length >= 5 &&
+                     int.TryParse(resp[2..5], out var pwr))
+            {
+                LastPower = pwr;
+            }
+            else if (resp.StartsWith("AG0") && resp.Length >= 6 &&
+                     int.TryParse(resp[3..6], out var afg))
+            {
+                LastAFGain = afg;
+            }
+            else if (resp.StartsWith("IF") && resp.Length >= 27)
+            {
+                // IF response: IF[MemCh 3][Freq 9][+/-][Offset 4][RIT][XIT][x][x][TX][Mode][VFO]...
+                if (long.TryParse(resp[5..14], out var ifFreq) && ifFreq > 0)
+                    LastFrequency = ifFreq;
+                // Mode at position 21 (0-indexed from 'I')
+                if (ModeMap.TryGetValue(resp[21], out var ifMode))
+                    LastMode = ifMode;
+            }
+        }
+        catch
+        {
+            // Parsing best-effort — never let a malformed response crash anything
+        }
     }
 
     // ========== FREQUENCY ==========

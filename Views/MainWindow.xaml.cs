@@ -299,10 +299,6 @@ public partial class MainWindow : Window
     {
         if (!_running) return;
 
-        // Yield to TCP proxy — if N1MM sent a command in the last 300ms, skip this
-        // poll cycle so the proxy command isn't queued behind 7 serial round-trips
-        if (Environment.TickCount64 - _radio.LastProxyActivityMs < 300) return;
-
         // ===== DISCONNECTED STATE =====
         if (!_radio.Connected)
         {
@@ -377,19 +373,55 @@ public partial class MainWindow : Window
         _wasConnected = true;
 
         // ===== CONNECTED STATE =====
+        // When a proxy client (N1MM etc.) is actively polling the radio, it saturates
+        // the serial lock. Instead of competing (and losing), we read the cached values
+        // that SendRaw already parsed from proxy traffic. Zero serial queries needed.
+        bool proxyActive = _radio.ProxyIsActive;
+
         try
         {
-            var freq = _radio.GetFreq();
-            if (freq <= 0) return;
+            long freq;
+            bool split;
+            string mode;
+            string vfo;
+            bool pttActive;
+            int smeter;
+            int power;
 
+            if (proxyActive)
+            {
+                // ── Proxy-fed: use cached values (no serial I/O) ──
+                freq = _radio.LastFrequency;
+                if (freq <= 0) return;
+                split = _radio.LastSplit;
+                mode = _radio.LastMode;
+                vfo = _radio.LastVFO;
+                pttActive = _radio.LastTXState;
+                smeter = _radio.LastSMeter;
+                power = _radio.LastPower;
+            }
+            else
+            {
+                // ── Normal polling: query the radio directly ──
+                freq = _radio.GetFreq();
+                if (freq <= 0) return;
+                split = _radio.GetSplit();
+                mode = _radio.GetMode();
+                vfo = _radio.GetVFO();
+                pttActive = _radio.GetTXStatus();
+                smeter = !pttActive ? _radio.GetSMeter() : 0;
+                power = _radio.GetPower();
+            }
+
+            // ── Update frequency display ──
             var mhz = freq / 1_000_000;
             var khz = (freq % 1_000_000) / 1_000;
             var hz = freq % 1_000;
             FreqLabel.Text = $"{mhz:D2}.{khz:D3}.{hz:D3}";
 
-            if (_radio.GetSplit())
+            if (split)
             {
-                var freqB = _radio.GetFreqB();
+                var freqB = proxyActive ? _radio.LastFreqB : _radio.GetFreqB();
                 if (freqB > 0)
                 {
                     var mB = freqB / 1_000_000; var kB = (freqB % 1_000_000) / 1_000; var hB = freqB % 1_000;
@@ -403,13 +435,11 @@ public partial class MainWindow : Window
                 SplitIndicator.Text = "";
             }
 
-            var mode = _radio.GetMode();
             ModeLabel.Text = mode;
             if (mode != _lastMode) { _stats.RecordModeChange(mode); _lastMode = mode; }
 
-            VfoLabel.Text = $"VFO-{_radio.GetVFO()}";
+            VfoLabel.Text = $"VFO-{vfo}";
 
-            var pttActive = _radio.GetTXStatus();
             var tunerActive = _tgxl.IsActive || _amp.IsActive;
 
             if (!tunerActive)
@@ -462,12 +492,10 @@ public partial class MainWindow : Window
 
             if (!pttActive)
             {
-                var smeter = _radio.GetSMeter();
                 SMeterBar.Value = smeter;
                 SMeterLabel.Text = BandHelper.RawToSUnit(smeter);
             }
 
-            var power = _radio.GetPower();
             PowerLabel.Text = $"Power: {power}W";
 
             var band = BandHelper.GetBand(freq);
