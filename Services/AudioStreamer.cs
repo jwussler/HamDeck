@@ -14,18 +14,21 @@ namespace HamDeck.Services;
 /// <summary>
 /// WebSocket audio broadcast service.
 /// 
-/// Receives PCM data from AudioRecorder via FeedAudio().
-/// Uses async/await on a LongRunning task for sends — no .Wait() blocking,
-/// no thread pool contention with CAT serial commands.
+/// Single send loop handles BOTH audio data (binary) and status updates (text).
+/// This prevents the "already one outstanding SendAsync" error that occurs when
+/// two separate loops call SendAsync on the same WebSocket simultaneously.
 /// </summary>
 public class AudioStreamer : IDisposable
 {
     private readonly Config _config;
     private readonly ConcurrentDictionary<string, WebSocket> _clients = new();
-    private readonly ConcurrentQueue<byte[]> _sendQueue = new();
+    private readonly ConcurrentQueue<QueueItem> _sendQueue = new();
     private readonly SemaphoreSlim _dataReady = new(0);
     private CancellationTokenSource? _cts;
     private int _clientIdCounter;
+
+    /// <summary>Queue item: either binary audio or text status JSON.</summary>
+    private readonly record struct QueueItem(byte[] Data, WebSocketMessageType Type);
 
     public bool IsStreaming { get; private set; }
     public int ClientCount => _clients.Count;
@@ -64,11 +67,12 @@ public class AudioStreamer : IDisposable
         _cts = new CancellationTokenSource();
         IsStreaming = true;
 
-        // LongRunning gives us a dedicated thread but allows proper async/await
+        // Single send loop — handles both audio and status
         Task.Factory.StartNew(() => SendLoopAsync(_cts.Token),
             _cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-        Task.Factory.StartNew(() => StatusLoopAsync(_cts.Token),
+        // Status producer — enqueues status JSON into the same queue
+        Task.Factory.StartNew(() => StatusProducerAsync(_cts.Token),
             _cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         Logger.Info("STREAM", "Audio streamer started ({0} Hz, 16-bit mono)",
@@ -77,7 +81,6 @@ public class AudioStreamer : IDisposable
 
     /// <summary>
     /// Called by AudioRecorder.OnDataAvailable. Must return instantly.
-    /// Only copies the buffer if there are active WebSocket clients.
     /// </summary>
     public void FeedAudio(byte[] buffer, int bytesRecorded)
     {
@@ -86,17 +89,59 @@ public class AudioStreamer : IDisposable
         var data = new byte[bytesRecorded];
         Buffer.BlockCopy(buffer, 0, data, 0, bytesRecorded);
 
-        // Drop oldest if queue is backing up (~1 second max)
-        while (_sendQueue.Count > 8)
+        // Drop oldest if backing up (~1 second max)
+        while (_sendQueue.Count > 10)
             _sendQueue.TryDequeue(out _);
 
-        _sendQueue.Enqueue(data);
+        _sendQueue.Enqueue(new QueueItem(data, WebSocketMessageType.Binary));
         _dataReady.Release();
     }
 
     /// <summary>
-    /// Async send loop on a dedicated LongRunning thread.
-    /// Uses await (not .Wait()) so I/O completion doesn't block.
+    /// Produces status JSON messages into the same queue as audio data.
+    /// Single send loop consumes both — no concurrent SendAsync on the same socket.
+    /// </summary>
+    private async Task StatusProducerAsync(CancellationToken ct)
+    {
+        long lastFreq = 0;
+        string lastMode = "";
+
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(250, ct); }
+            catch (OperationCanceledException) { break; }
+
+            if (_clients.IsEmpty || !_cachedConnected) continue;
+
+            var freq = _cachedFreq;
+            var mode = _cachedMode;
+
+            if (freq == lastFreq && mode == lastMode) continue;
+            lastFreq = freq;
+            lastMode = mode;
+
+            var status = JsonSerializer.Serialize(new
+            {
+                type = "radio_status",
+                frequency = freq,
+                mode,
+                band = _cachedBand,
+                power = _cachedPower,
+                tx = _cachedTx,
+                clients = _clients.Count,
+                streaming = IsStreaming,
+                sample_rate = _config.RecordSampleRate
+            });
+
+            _sendQueue.Enqueue(new QueueItem(Encoding.UTF8.GetBytes(status), WebSocketMessageType.Text));
+            _dataReady.Release();
+        }
+    }
+
+    /// <summary>
+    /// Single async send loop. Drains the queue and sends to all clients.
+    /// Both audio (binary) and status (text) go through here — guarantees
+    /// only one SendAsync per client at a time.
     /// </summary>
     private async Task SendLoopAsync(CancellationToken ct)
     {
@@ -104,12 +149,11 @@ public class AudioStreamer : IDisposable
         {
             try
             {
-                // Wait for data with timeout
                 await _dataReady.WaitAsync(500, ct);
             }
             catch (OperationCanceledException) { break; }
 
-            while (_sendQueue.TryDequeue(out var data))
+            while (_sendQueue.TryDequeue(out var item))
             {
                 if (ct.IsCancellationRequested) return;
                 if (_clients.IsEmpty) continue;
@@ -126,10 +170,9 @@ public class AudioStreamer : IDisposable
 
                     try
                     {
-                        // True async — no blocking, no thread pool contention
                         using var timeout = new CancellationTokenSource(1000);
                         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-                        await kvp.Value.SendAsync(data, WebSocketMessageType.Binary, true, linked.Token);
+                        await kvp.Value.SendAsync(item.Data, item.Type, true, linked.Token);
                     }
                     catch
                     {
@@ -141,70 +184,6 @@ public class AudioStreamer : IDisposable
                     foreach (var id in dead)
                         _clients.TryRemove(id, out _);
             }
-        }
-    }
-
-    private async Task StatusLoopAsync(CancellationToken ct)
-    {
-        long lastFreq = 0;
-        string lastMode = "";
-
-        while (!ct.IsCancellationRequested)
-        {
-            try { await Task.Delay(250, ct); }
-            catch (OperationCanceledException) { break; }
-
-            if (_clients.IsEmpty || !_cachedConnected) continue;
-
-            try
-            {
-                var freq = _cachedFreq;
-                var mode = _cachedMode;
-
-                if (freq == lastFreq && mode == lastMode) continue;
-                lastFreq = freq;
-                lastMode = mode;
-
-                var status = JsonSerializer.Serialize(new
-                {
-                    type = "radio_status",
-                    frequency = freq,
-                    mode,
-                    band = _cachedBand,
-                    power = _cachedPower,
-                    tx = _cachedTx,
-                    clients = _clients.Count,
-                    streaming = IsStreaming,
-                    sample_rate = _config.RecordSampleRate
-                });
-
-                var buf = Encoding.UTF8.GetBytes(status);
-                List<string>? dead = null;
-
-                foreach (var kvp in _clients)
-                {
-                    if (kvp.Value.State == WebSocketState.Open)
-                    {
-                        try
-                        {
-                            using var timeout = new CancellationTokenSource(1000);
-                            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-                            await kvp.Value.SendAsync(buf, WebSocketMessageType.Text, true, linked.Token);
-                        }
-                        catch { (dead ??= new()).Add(kvp.Key); }
-                    }
-                    else
-                    {
-                        (dead ??= new()).Add(kvp.Key);
-                    }
-                }
-
-                if (dead != null)
-                    foreach (var id in dead)
-                        _clients.TryRemove(id, out _);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (Exception ex) { Logger.Debug("STREAM", "Status error: {0}", ex.Message); }
         }
     }
 
@@ -222,6 +201,7 @@ public class AudioStreamer : IDisposable
             var remoteAddr = ctx.Request.RemoteEndPoint?.ToString() ?? "unknown";
             Logger.Info("STREAM", "Client connected: {0} ({1})", clientId, remoteAddr);
 
+            // Send config via the queue so it doesn't race with other sends
             var config = JsonSerializer.Serialize(new
             {
                 type = "config",
@@ -229,8 +209,10 @@ public class AudioStreamer : IDisposable
                 channels = 1,
                 bits_per_sample = 16
             });
-            await ws.SendAsync(Encoding.UTF8.GetBytes(config), WebSocketMessageType.Text, true, ct);
+            _sendQueue.Enqueue(new QueueItem(Encoding.UTF8.GetBytes(config), WebSocketMessageType.Text));
+            _dataReady.Release();
 
+            // Keep connection alive
             var buf = new byte[256];
             while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
             {
