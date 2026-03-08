@@ -1,6 +1,6 @@
 @echo off
 echo ============================================
-echo   HamDeck v2.0 - Build Installer
+echo   HamDeck v2.1 - Build Installer
 echo ============================================
 echo.
 
@@ -41,7 +41,7 @@ if "%ISCC%"=="" (
 echo.
 echo ============================================
 echo   Installer created:
-echo   %CD%\installer\HamDeck-v2.0-Setup.exe
+echo   %CD%\installer\HamDeck-v2.1-Setup.exe
 echo ============================================
 echo.
 pause
