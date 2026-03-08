@@ -28,10 +28,26 @@ public static class BandHelper
         return "";
     }
 
+    /// <summary>
+    /// Returns the default mode for a given frequency used when switching bands via
+    /// the band buttons or entering a frequency manually.
+    ///
+    /// NOTE: This deliberately returns USB for all frequencies above 10 MHz,
+    /// including frequencies that fall within CW sub-bands (e.g. 14.000–14.070).
+    /// That is intentional: the BandFrequencies presets below all target the phone
+    /// calling frequencies for each band, so the "wrong" CW-segment edge case never
+    /// arises in normal use. If you add a CW band-preset, call SetMode("CW")
+    /// explicitly rather than relying on this helper.
+    ///
+    /// Special cases:
+    ///   - 60m (5.3–5.5 MHz) is USB by IARU/FCC plan (not LSB like other HF below 10 MHz)
+    ///   - 30m (10.1–10.15 MHz) is CW/digital only — returns "CW" for completeness,
+    ///     though digital ops will want to set DATA-U manually after tuning
+    /// </summary>
     public static string GetModeForFrequency(long freqHz)
     {
-        if (freqHz >= 5_300_000 && freqHz <= 5_500_000) return "USB"; // 60m
-        if (freqHz >= 10_100_000 && freqHz <= 10_150_000) return "CW"; // 30m
+        if (freqHz >= 5_300_000 && freqHz <= 5_500_000) return "USB"; // 60m — USB per band plan
+        if (freqHz >= 10_100_000 && freqHz <= 10_150_000) return "CW"; // 30m — CW/digital only
         return freqHz < 10_000_000 ? "LSB" : "USB";
     }
 
@@ -50,7 +66,9 @@ public static class BandHelper
         return dbOver <= 0 ? "S9" : $"S9+{dbOver}";
     }
 
-    /// <summary>Phone band presets — center of the SSB phone segment for each band</summary>
+    /// <summary>Phone band presets — center of the SSB phone segment for each band.
+    /// These are the frequencies the band buttons tune to. All target the phone calling
+    /// frequency rather than the CW or digital segment — see GetModeForFrequency().</summary>
     public static readonly Dictionary<string, long> BandFrequencies = new()
     {
         ["160"] = 1_880_000,   // 160m phone: 1.800-2.000, center ~1.880
@@ -80,8 +98,8 @@ public static class FrequencyHelper
             var parts = input.Split('.');
             if (parts.Length == 2 && long.TryParse(parts[0], out var intPart))
             {
-                if (double.TryParse(input, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out var f))
+                if (double.TryParse(input, NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out var f))
                 {
                     return intPart < 100 ? (long)(f * 1_000_000) : (long)(f * 1_000);
                 }

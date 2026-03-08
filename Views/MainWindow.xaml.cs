@@ -17,7 +17,11 @@ namespace HamDeck.Views;
 
 public partial class MainWindow : Window
 {
-    private Config _config;
+    // WARNING FIX: _config is now readonly — all services hold a reference to this
+    // same object. Use _config.CopyFrom(newConfig) in Settings_Click so every service
+    // automatically sees updated values without a restart. Reassigning _config = dlg.Config
+    // broke ClusterPollInterval, PTTRecordSeconds, AudioDevice, etc. for live services.
+    private readonly Config _config;
     private readonly RadioController _radio;
     private readonly AudioRecorder _recorder;
     private readonly ApiServer _api;
@@ -60,6 +64,23 @@ public partial class MainWindow : Window
         var logLevel = _config.LogLevel == "debug" ? Services.LogLevel.Debug : Services.LogLevel.Info;
         Logger.Init(logLevel, _config.LogToFile);
         Logger.Info("MAIN", "HamDeck v2.0 (C#) starting");
+
+        // NOTE FIX: Warn the user if a corrupt config was detected on load.
+        // Config.Load() backs it up and returns defaults; we surface that here so the
+        // user isn't silently running with defaults they didn't expect.
+        if (_config.WasLoadedFromCorruptFile)
+        {
+            Logger.Warn("CONFIG", "Config file was corrupt — loaded defaults. A backup was saved to: {0}.corrupt_*", Config.ConfigFile);
+            Dispatcher.BeginInvoke(() =>
+            {
+                MessageBox.Show(
+                    "HamDeck could not read your config file and has loaded defaults.\n\n" +
+                    "A backup of the corrupt file was saved next to config.json.\n\n" +
+                    "Please review your settings.",
+                    "Config Load Error",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            });
+        }
 
         foreach (var err in _config.Validate())
             Logger.Warn("CONFIG", err);
@@ -197,20 +218,42 @@ public partial class MainWindow : Window
         var port = PortSelect.SelectedItem?.ToString();
         if (string.IsNullOrEmpty(port)) { MessageBox.Show("Select a COM port"); return; }
 
-        try
+        // WARNING FIX: Move Connect() off the UI thread. _radio.Connect() opens a COM
+        // port with Thread.Sleep(100) + GetFreq() (up to 200ms timeout), freezing the
+        // WPF dispatcher thread on slow or absent ports. Disable UI for feedback.
+        ConnectBtn.IsEnabled = false;
+        ConnStatus.Text = "\u25CF Connecting...";
+        ConnStatus.Foreground = FindResource("WarningBrush") as SolidColorBrush;
+
+        Task.Run(() =>
         {
-            _radio.Connect(port, _config.RadioBaud);
-            _config.RadioPort = port;
-            _config.Save();
-            _wasConnected = true;
-            ConnStatus.Text = "\u25CF Connected";
-            ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
-            ConnectBtn.Content = "Disconnect";
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Connection failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+            try
+            {
+                _radio.Connect(port, _config.RadioBaud);
+                Dispatcher.Invoke(() =>
+                {
+                    _config.RadioPort = port;
+                    _config.Save();
+                    _wasConnected = true;
+                    ConnStatus.Text = "\u25CF Connected";
+                    ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
+                    ConnectBtn.Content = "Disconnect";
+                    ConnectBtn.IsEnabled = true;
+                });
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    ConnStatus.Text = "\u25CF Disconnected";
+                    ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
+                    ConnectBtn.Content = "Connect";
+                    ConnectBtn.IsEnabled = true;
+                    MessageBox.Show($"Connection failed: {ex.Message}", "Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                });
+            }
+        });
     }
 
     private void AutoDetect_Click(object sender, RoutedEventArgs e)
@@ -447,15 +490,12 @@ public partial class MainWindow : Window
 
             if (_recorder.IsRecording)
             {
-                var status = _recorder.GetStatus();
-                var elapsed = (double)status["duration"];
+                var recStatus = _recorder.GetStatus();
+                var elapsed = (double)recStatus["duration"];
                 if (_autoRecordActive && _autoRecordTimer != default)
                 {
                     var remaining = (_autoRecordTimer - DateTime.UtcNow).TotalSeconds;
-                    if (remaining > 0)
-                        RecordTime.Text = $"{elapsed:F0}s (-{remaining:F0}s)";
-                    else
-                        RecordTime.Text = $"{elapsed:F0}s";
+                    RecordTime.Text = remaining > 0 ? $"{elapsed:F0}s (-{remaining:F0}s)" : $"{elapsed:F0}s";
                 }
                 else
                 {
@@ -591,7 +631,9 @@ public partial class MainWindow : Window
     private void ToggleAntenna_Click(object s, RoutedEventArgs e) => _radio.ToggleAntenna();
     private void Ant1_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(1);
     private void Ant2_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(2);
-    private void RxAnt_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(3);
+    private void RxAnt_Click(object s, RoutedEventArgs e)
+    { var cur = _radio.GetAntenna(); _radio.SetAntenna(cur == 3 ? 1 : 3); }
+
     private void CycleAGC_Click(object s, RoutedEventArgs e)
     {
         var current = _radio.GetAGC();
@@ -728,11 +770,16 @@ public partial class MainWindow : Window
         var dlg = new SettingsDialog(_config) { Owner = this };
         if (dlg.ShowDialog() == true)
         {
-            _config = dlg.Config;
+            // WARNING FIX: Use CopyFrom() to update _config in-place instead of
+            // reassigning the field. All services (_recorder, _cluster, _flexknob,
+            // _wavelog, etc.) hold a direct reference to _config — reassigning here
+            // left them all pointing at the old object, so changes to AudioDevice,
+            // ClusterPollInterval, PTTRecordSeconds, etc. required an app restart.
+            _config.CopyFrom(dlg.Config);
             _config.Save();
             Logger.Info("SETTINGS", "Configuration saved");
 
-            // Restart CAT proxy if its settings changed
+            // Restart CAT proxy if its port setting changed
             _catProxy?.Dispose();
             _catProxy = null;
             if (_config.CatProxyEnabled)
@@ -765,10 +812,7 @@ public partial class MainWindow : Window
         Activate();
     }
 
-    private void TrayExit_Click(object sender, RoutedEventArgs e)
-    {
-        ForceExit();
-    }
+    private void TrayExit_Click(object sender, RoutedEventArgs e) => ForceExit();
 
     private void ForceExit()
     {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using NAudio.Wave;
@@ -9,6 +10,10 @@ namespace HamDeck.Services;
 /// <summary>
 /// Audio recorder with ring buffer for lookback capture and continuous recording.
 /// Uses NAudio for Windows audio capture.
+///
+/// Startup order: StartBuffer() is always called before Start(). Start() will call
+/// StartBuffer() automatically if the buffer was never started, but the intended
+/// sequence is: StartBuffer() on app launch (2s delay), Start() on demand.
 /// </summary>
 public class AudioRecorder : IDisposable
 {
@@ -32,7 +37,8 @@ public class AudioRecorder : IDisposable
         _config = config;
     }
 
-    /// <summary>Start the lookback ring buffer (always-on background capture)</summary>
+    /// <summary>Start the lookback ring buffer (always-on background capture).
+    /// Call this once on startup before any recording begins.</summary>
     public void StartBuffer()
     {
         if (IsBuffering) return;
@@ -91,7 +97,13 @@ public class AudioRecorder : IDisposable
                 {
                     var data = _ringBuffer.ToArray();
                     var keep = data[^maxBytes..];
+
+                    // BUG FIX: Must reset Position to 0 after SetLength(0).
+                    // SetLength truncates the logical content but leaves Position at its old
+                    // value. Writing without resetting Position zero-fills the gap and
+                    // produces a corrupt stream.
                     _ringBuffer.SetLength(0);
+                    _ringBuffer.Position = 0;
                     _ringBuffer.Write(keep);
                 }
             }
@@ -105,6 +117,9 @@ public class AudioRecorder : IDisposable
     public void Start()
     {
         if (IsRecording) return;
+
+        // Ensure buffer is running first — determines the WaveFormat used for the file
+        if (!IsBuffering) StartBuffer();
 
         Directory.CreateDirectory(_config.RecordPath);
         var freq = _radio.Connected ? _radio.GetFreq() : 0;
@@ -121,9 +136,6 @@ public class AudioRecorder : IDisposable
         }
 
         Logger.Info("RECORDER", "Recording started: {0}", filename);
-
-        // Start buffer if not already running
-        if (!IsBuffering) StartBuffer();
     }
 
     /// <summary>Stop recording and return the filename</summary>
@@ -158,7 +170,6 @@ public class AudioRecorder : IDisposable
 
         if (oldFile == null || !File.Exists(oldFile)) return null;
 
-        // Move/rename to the QSO path with organized folders
         try
         {
             Directory.CreateDirectory(savePath);

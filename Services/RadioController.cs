@@ -20,6 +20,10 @@ public class RadioController : IDisposable
     public string LastMode { get; private set; } = "";
     public int LastPower { get; private set; }
 
+    /// <summary>Last cached TX/PTT state — updated by GetTXStatus().
+    /// WaveLogServer reads this to avoid redundant serial queries during broadcasts.</summary>
+    public bool LastTXState { get; private set; }
+
     /// <summary>Timestamp of last proxy command — polling suppresses itself briefly after proxy activity</summary>
     public long LastProxyActivityMs { get; private set; }
 
@@ -42,11 +46,17 @@ public class RadioController : IDisposable
             port.Open();
             Thread.Sleep(100);
 
-            _port = port;
-            PortName = portName;
-            _failCount = 0;
+            // BUG FIX: Assign _port inside the lock so Send() (which also acquires _lock
+            // before reading _port) cannot observe a partially-initialized port state.
+            // Previously _port was assigned outside the lock, creating a small race window.
+            lock (_lock)
+            {
+                _port = port;
+                PortName = portName;
+                _failCount = 0;
+            }
 
-            // Test connection
+            // Test connection — Send() will now see the locked _port assignment above
             var freq = GetFreq();
             if (freq > 0)
             {
@@ -55,16 +65,16 @@ public class RadioController : IDisposable
             }
             else
             {
+                lock (_lock) { _port = null; PortName = ""; }
                 port.Close();
                 port.Dispose();
-                _port = null;
                 throw new Exception("Radio not responding");
             }
         }
         catch
         {
             try { port.Dispose(); } catch { }
-            _port = null;
+            lock (_lock) { _port = null; }
             throw;
         }
     }
@@ -122,7 +132,10 @@ public class RadioController : IDisposable
 
                 if (!expectResponse) return "";
 
-                Thread.Sleep(30);
+                // Reduced from 30ms → 10ms. The FTDX-101 responds in 5-15ms at 38400 baud.
+                // The original 30ms sleep was consuming most of the 200ms UpdateTick budget
+                // across 7+ queries per cycle.
+                Thread.Sleep(10);
                 var buf = new byte[256];
                 var response = new List<byte>();
                 var deadline = DateTime.UtcNow.AddMilliseconds(200);
@@ -165,16 +178,23 @@ public class RadioController : IDisposable
         bool isQuery =
             upper == "FA;" || upper == "FB;" || upper == "IF;" ||
             upper == "MD0;" || upper == "TX;" || upper == "PC;" ||
-            upper == "FT;" || upper == "VS;" || upper == "AG0;" ||
+            upper == "ST;" || upper == "FT;" || upper == "VS;" || upper == "AG0;" ||
             upper == "RG0;" || upper == "SM0;" || upper == "SM1;" ||
-            upper == "RM1;" || upper == "RM4;" || upper == "RM6;" ||
+            upper == "RM0;" || upper == "RM1;" || upper == "RM2;" || upper == "RM3;" ||
+            upper == "RM4;" || upper == "RM5;" || upper == "RM6;" || upper == "RM7;" ||
+            upper == "RM8;" || upper == "RM9;" ||
             upper == "PA0;" || upper == "RA0;" || upper == "GT0;" ||
             upper == "NB0;" || upper == "NR0;" || upper == "BC0;" ||
-            upper == "RT;" || upper == "XT;" || upper == "RD;" ||
-            upper == "VX;" || upper == "PR;" || upper == "LK;" ||
-            upper == "KS;" || upper == "KP;" || upper == "BI;" ||
+            upper == "RT;"  || upper == "XT;" || upper == "RD;"  ||
+            upper == "VX;"  || upper == "PR;" || upper == "PR0;" || upper == "PR1;" || upper == "LK;"  ||
+            upper == "KS;"  || upper == "KP;" || upper == "BI;"  ||
             upper == "AN0;" || upper == "AN1;" || upper == "SH0;" ||
-            upper == "AC;";
+            upper == "AC;"  || upper == "ID;" || upper == "OI;" ||
+            upper == "FN;"  || upper == "FR;" || upper == "FS;" ||
+            upper == "SQ0;" || upper == "SQ1;" || upper == "MG;" ||
+            upper == "PS;"  || upper == "RS;" || upper == "SC;" ||
+            upper == "SD;"  || upper == "SY;" || upper == "DA;" ||
+            upper == "MC;"  || upper == "MS;";
 
         // Mark proxy activity so the UI polling loop yields briefly
         LastProxyActivityMs = Environment.TickCount64;
@@ -231,7 +251,7 @@ public class RadioController : IDisposable
     private static readonly Dictionary<char, string> ModeMap = new()
     {
         ['1'] = "LSB", ['2'] = "USB", ['3'] = "CW-U", ['4'] = "FM",
-        ['5'] = "AM", ['6'] = "RTTY-L", ['7'] = "CW-L", ['8'] = "DATA-L",
+        ['5'] = "AM",  ['6'] = "RTTY-L", ['7'] = "CW-L", ['8'] = "DATA-L",
         ['9'] = "RTTY-U", ['A'] = "DATA-FM", ['B'] = "FM-N", ['C'] = "DATA-U",
         ['D'] = "AM-N", ['E'] = "C4FM"
     };
@@ -294,7 +314,9 @@ public class RadioController : IDisposable
     public bool GetTXStatus()
     {
         var resp = Send("TX;");
-        return resp.StartsWith("TX") && resp.Length >= 3 && resp[2] != '0';
+        var state = resp.StartsWith("TX") && resp.Length >= 3 && resp[2] != '0';
+        LastTXState = state;
+        return state;
     }
 
     public void SetPTT(bool on) => Send(on ? "TX1;" : "TX0;", false);
@@ -329,8 +351,8 @@ public class RadioController : IDisposable
 
     public int GetPowerMeter()
     {
-        var resp = Send("RM1;");
-        if (resp.StartsWith("RM1") && resp.Length >= 6 && int.TryParse(resp[3..6], out var v)) return v;
+        var resp = Send("RM5;");
+        if (resp.StartsWith("RM5") && resp.Length >= 6 && int.TryParse(resp[3..6], out var v)) return v;
         return 0;
     }
 
@@ -352,11 +374,11 @@ public class RadioController : IDisposable
 
     public bool GetSplit()
     {
-        var resp = Send("FT;");
-        return resp.StartsWith("FT") && resp.Length >= 3 && resp[2] == '1';
+        var resp = Send("ST;");
+        return resp.StartsWith("ST") && resp.Length >= 3 && resp[2] == '1';
     }
 
-    public void SetSplit(bool on) => Send(on ? "FT1;" : "FT0;", false);
+    public void SetSplit(bool on) => Send(on ? "ST1;" : "ST0;", false);
 
     // ========== AF/RF GAIN ==========
 
@@ -377,7 +399,6 @@ public class RadioController : IDisposable
     }
 
     public void SetRFGain(int level) => Send($"RG0{Math.Clamp(level, 0, 255):D3};", false);
-
     public void SetMicGain(int level) => Send($"MG{Math.Clamp(level, 0, 100):D3};", false);
 
     // ========== FILTERS ==========
@@ -415,14 +436,14 @@ public class RadioController : IDisposable
     {
         var resp = Send("GT0;");
         if (resp.StartsWith("GT0") && resp.Length >= 4)
-            return resp[3] switch { '1' => "OFF", '2' => "FAST", '3' => "MID", '4' => "SLOW", '5' => "AUTO", _ => "?" };
+            return resp[3] switch { '0' => "OFF", '1' => "FAST", '2' => "MID", '3' => "SLOW", '4' => "AUTO", '5' => "AUTO", '6' => "AUTO", _ => "?" };
         return "?";
     }
 
     public void SetAGC(string mode)
     {
         var codes = new Dictionary<string, string>
-            { ["OFF"] = "1", ["FAST"] = "2", ["MID"] = "3", ["SLOW"] = "4", ["AUTO"] = "5" };
+            { ["OFF"] = "0", ["FAST"] = "1", ["MID"] = "2", ["SLOW"] = "3", ["AUTO"] = "4" };
         if (codes.TryGetValue(mode.ToUpper(), out var c)) Send($"GT0{c};", false);
     }
 
@@ -431,8 +452,13 @@ public class RadioController : IDisposable
     public bool GetVOX() => Send("VX;").Contains("VX1");
     public void SetVOX(bool on) => Send(on ? "VX1;" : "VX0;", false);
 
-    public bool GetComp() => Send("PR;").Contains("PR1");
-    public void SetComp(bool on) => Send(on ? "PR1;" : "PR0;", false);
+    public bool GetComp()
+    {
+        var resp = Send("PR0;");
+        // Answer: PR0P2; where P2: 1=OFF, 2=ON
+        return resp.StartsWith("PR0") && resp.Length >= 4 && resp[3] == '2';
+    }
+    public void SetComp(bool on) => Send(on ? "PR02;" : "PR01;", false);
 
     // ========== RIT / XIT ==========
 
@@ -465,25 +491,35 @@ public class RadioController : IDisposable
     public void PlayCWMemory(int mem) { if (mem >= 1 && mem <= 5) Send($"KY{mem};", false); }
     public void StopCWMemory() => Send("KY0;", false);
     public void SendCWText(string text) => Send($"KM1{text[..Math.Min(text.Length, 50)]};", false);
-    public bool GetCWMemoryStatus() => false;
 
     public int GetCWPitch()
     {
         var resp = Send("KP;");
         if (resp.StartsWith("KP") && resp.Length >= 4 && int.TryParse(resp[2..4], out var step))
-            return 300 + step * 50;
+            return 300 + step * 10;  // PDF: 00=300Hz to 75=1050Hz, 10Hz steps
         return 600;
     }
 
-    public void SetCWPitch(int hz) => Send($"KP{(Math.Clamp(hz, 300, 1050) - 300) / 50:D2};", false);
+    public void SetCWPitch(int hz) => Send($"KP{(Math.Clamp(hz, 300, 1050) - 300) / 10:D2};", false);
     public int GetBreakIn() { var r = Send("BI;"); return r.StartsWith("BI") && r.Length >= 3 ? r[2] - '0' : 1; }
-    public void SetBreakIn(int mode) => Send($"BI{Math.Clamp(mode, 0, 2)};", false);
+    public void SetBreakIn(int mode) => Send($"BI{Math.Clamp(mode, 0, 1)};", false);
+
+    /// <summary>
+    /// Returns true if the radio CW memory playback is active.
+    /// KY; query: FTDX-101 responds KY1; during playback, KY0; when idle.
+    /// NOTE 18 FIX: Was a hard-coded stub always returning false.
+    /// </summary>
+    public bool GetCWMemoryStatus()
+    {
+        var resp = Send("KY;");
+        return resp.StartsWith("KY") && resp.Length >= 3 && resp[2] == '1';
+    }
 
     // ========== ANTENNA / TUNER / MISC ==========
 
     public void StartTune() => Send("AC002;", false);
     public void RecallMemory(int num) => Send($"MC{num:D3};", false);
-    public void SetWidth(int w) => Send($"SH0{w:D2};", false);
+    public void SetWidth(int w) => Send($"SH00{w:D2};", false);
 
     public int GetAntenna()
     {
@@ -497,11 +533,14 @@ public class RadioController : IDisposable
 
     public bool GetRxAntenna()
     {
-        var resp = Send("AN1;");
-        return resp.StartsWith("AN1") && resp.Length >= 4 && resp[3] == '1';
+        // ANT3 SELECT is a menu item: OPERATION SETTING -> GENERAL -> ANT3 SELECT
+        // EX command: P1=03 (OPERATION SETTING), P2=01 (GENERAL), P3=03 (ANT3 SELECT)
+        // Answer: EX030103P4; where P4=0 means TRX, P4=1 means RX ANT
+        var resp = Send("EX030103;");
+        return resp.Length >= 9 && resp[8] == '1';
     }
 
-    public void SetRxAntenna(bool useRxAnt) => Send(useRxAnt ? "AN11;" : "AN10;", false);
+    public void SetRxAntenna(bool useRxAnt) => Send($"EX030103{(useRxAnt ? 1 : 0)};", false);
 
     // ========== PORT DETECTION ==========
 

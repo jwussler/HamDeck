@@ -27,6 +27,13 @@ public class WaveLogServer : IDisposable
     private string _lastMode = "";
     private int _lastPower;
 
+    // WARNING FIX: Cache TX state here instead of calling _radio.GetTXStatus() from
+    // inside BroadcastToAll()/SendStatus(). GetTXStatus() issues a TX; serial query —
+    // calling it per WebSocket client during a broadcast compounds serial bus traffic
+    // and competes with MainWindow's UpdateTick for _radio's lock.
+    // UpdateLoop updates _lastTX from _radio.LastTXState (set by the UI poll cycle).
+    private bool _lastTX;
+
     public WaveLogServer(RadioController radio, Config config)
     {
         _radio = radio;
@@ -96,7 +103,8 @@ public class WaveLogServer : IDisposable
             return;
         }
 
-        WriteJson(resp, new { status = "ok", service = "HamDeck WaveLog Bridge", frequency = _radio.LastFrequency, mode = _radio.LastMode });
+        WriteJson(resp, new { status = "ok", service = "HamDeck WaveLog Bridge",
+            frequency = _radio.LastFrequency, mode = _radio.LastMode });
     }
 
     private async Task RunWebSocketServer(CancellationToken ct)
@@ -161,16 +169,20 @@ public class WaveLogServer : IDisposable
             await Task.Delay(500, ct);
             if (!_radio.Connected) continue;
 
-            // Use cached values - MainWindow's UpdateTick already calls GetFreq/GetMode
-            // every 500ms so these are always fresh. Avoids doubling serial bus traffic
-            // which was causing collisions when sharing the port with N1MM via VSPD.
-            var freq = _radio.LastFrequency;
-            var mode = _radio.LastMode;
-            var power = _radio.LastPower; // fully cached - no serial hit needed
+            // Use cached values — MainWindow's UpdateTick already calls GetFreq/GetMode/GetTXStatus
+            // every 200ms so these are always fresh. Avoids doubling serial bus traffic.
+            var freq  = _radio.LastFrequency;
+            var mode  = _radio.LastMode;
+            var power = _radio.LastPower;
+            // LastTXState is updated by GetTXStatus() in the UI poll cycle — no extra serial hit needed.
+            var tx    = _radio.LastTXState;
 
-            if (freq != _lastFreq || mode != _lastMode || power != _lastPower)
+            if (freq != _lastFreq || mode != _lastMode || power != _lastPower || tx != _lastTX)
             {
-                _lastFreq = freq; _lastMode = mode; _lastPower = power;
+                _lastFreq  = freq;
+                _lastMode  = mode;
+                _lastPower = power;
+                _lastTX    = tx;
                 await BroadcastToAll();
                 await PostToWavelog(freq, mode, power);
             }
@@ -186,10 +198,10 @@ public class WaveLogServer : IDisposable
             var apiUrl = _config.WavelogURL.TrimEnd('/') + "/api/radio";
             var payload = new Dictionary<string, object>
             {
-                ["key"] = _config.WavelogAPIKey,
-                ["radio"] = "HamDeck",
+                ["key"]       = _config.WavelogAPIKey,
+                ["radio"]     = "HamDeck",
                 ["frequency"] = freq,
-                ["mode"] = mode,
+                ["mode"]      = mode,
                 ["timestamp"] = DateTime.UtcNow.ToString("yyyy/MM/dd HH:mm")
             };
             if (power > 0) payload["power"] = power;
@@ -206,13 +218,14 @@ public class WaveLogServer : IDisposable
 
     private async Task SendStatus(WebSocket ws)
     {
+        // Uses _lastTX (cached) — no serial query
         var status = JsonSerializer.Serialize(new
         {
-            type = "radio_status",
+            type      = "radio_status",
             frequency = _radio.LastFrequency,
-            mode = _radio.LastMode,
-            power = _lastPower,
-            tx = _radio.GetTXStatus()
+            mode      = _radio.LastMode,
+            power     = _lastPower,
+            tx        = _lastTX
         });
         var buf = Encoding.UTF8.GetBytes(status);
         await ws.SendAsync(buf, WebSocketMessageType.Text, true, CancellationToken.None);
@@ -220,13 +233,14 @@ public class WaveLogServer : IDisposable
 
     private async Task BroadcastToAll()
     {
+        // Uses _lastTX (cached) — no serial query per client
         var status = JsonSerializer.Serialize(new
         {
-            type = "radio_status",
+            type      = "radio_status",
             frequency = _lastFreq,
-            mode = _lastMode,
-            power = _lastPower,
-            tx = _radio.GetTXStatus()
+            mode      = _lastMode,
+            power     = _lastPower,
+            tx        = _lastTX
         });
         var buf = Encoding.UTF8.GetBytes(status);
 

@@ -19,13 +19,13 @@ namespace HamDeck.Views;
 public class DxClusterWindow : Window
 {
     // Colors matching main HamDeck theme
-    private static readonly Color DarkBg = Color.FromRgb(0x1A, 0x1A, 0x2E);
-    private static readonly Color CardBg = Color.FromRgb(0x16, 0x21, 0x3E);
-    private static readonly Color InputBg = Color.FromRgb(0x0F, 0x34, 0x60);
-    private static readonly Color HeaderBg = Color.FromRgb(0x0D, 0x1B, 0x33);
+    private static readonly Color DarkBg    = Color.FromRgb(0x1A, 0x1A, 0x2E);
+    private static readonly Color CardBg    = Color.FromRgb(0x16, 0x21, 0x3E);
+    private static readonly Color InputBg   = Color.FromRgb(0x0F, 0x34, 0x60);
+    private static readonly Color HeaderBg  = Color.FromRgb(0x0D, 0x1B, 0x33);
     private static readonly Color CyanAccent = Color.FromRgb(0x00, 0xD4, 0xFF);
-    private static readonly Color DimText = Color.FromRgb(0x88, 0x99, 0xAA);
-    private static readonly Color RowHover = Color.FromRgb(0x1A, 0x2D, 0x50);
+    private static readonly Color DimText   = Color.FromRgb(0x88, 0x99, 0xAA);
+    private static readonly Color RowHover  = Color.FromRgb(0x1A, 0x2D, 0x50);
     private static readonly Color BorderColor = Color.FromRgb(0x2A, 0x3A, 0x5A);
 
     private readonly DxClusterClient _cluster;
@@ -49,7 +49,13 @@ public class DxClusterWindow : Window
         _radio = radio;
         _config = config;
 
-        Title = "DX Cluster \u2014 WA0O";
+        // CLEANUP FIX: Use config.ClusterCallsign instead of the hardcoded "WA0O" literal.
+        // Falls back to "DX Cluster" if the callsign field is not set.
+        var callsign = string.IsNullOrWhiteSpace(config.ClusterCallsign)
+            ? "DX Cluster"
+            : $"DX Cluster \u2014 {config.ClusterCallsign.ToUpperInvariant()}";
+        Title = callsign;
+
         Width = 820;
         Height = 560;
         Background = new SolidColorBrush(DarkBg);
@@ -158,7 +164,6 @@ public class DxClusterWindow : Window
             FontSize = 12,
         };
 
-        // Dark item container style
         var itemStyle = new Style(typeof(ListViewItem));
         itemStyle.Setters.Add(new Setter(ListViewItem.BackgroundProperty, new SolidColorBrush(CardBg)));
         itemStyle.Setters.Add(new Setter(ListViewItem.ForegroundProperty, Brushes.White));
@@ -179,7 +184,6 @@ public class DxClusterWindow : Window
 
         var gridView = new GridView();
 
-        // Column header style
         var headerStyle = new Style(typeof(GridViewColumnHeader));
         headerStyle.Setters.Add(new Setter(GridViewColumnHeader.BackgroundProperty, new SolidColorBrush(HeaderBg)));
         headerStyle.Setters.Add(new Setter(GridViewColumnHeader.ForegroundProperty, new SolidColorBrush(CyanAccent)));
@@ -190,13 +194,13 @@ public class DxClusterWindow : Window
         headerStyle.Setters.Add(new Setter(GridViewColumnHeader.FontSizeProperty, 11.5));
         gridView.ColumnHeaderContainerStyle = headerStyle;
 
-        gridView.Columns.Add(MakeColumn("Time", "TimeDisplay", 50));
-        gridView.Columns.Add(MakeColumn("Freq", "DisplayFreq", 80));
-        gridView.Columns.Add(MakeColumn("DX Call", "Spotted", 85));
-        gridView.Columns.Add(MakeColumn("Entity", "Entity", 120));
-        gridView.Columns.Add(MakeColumn("Mode", "Mode", 55));
-        gridView.Columns.Add(MakeColumn("Band", "Band", 50));
-        gridView.Columns.Add(MakeColumn("Spotter", "Spotter", 80));
+        gridView.Columns.Add(MakeColumn("Time",    "TimeDisplay",  50));
+        gridView.Columns.Add(MakeColumn("Freq",    "DisplayFreq",  80));
+        gridView.Columns.Add(MakeColumn("DX Call", "Spotted",      85));
+        gridView.Columns.Add(MakeColumn("Entity",  "Entity",      120));
+        gridView.Columns.Add(MakeColumn("Mode",    "Mode",         55));
+        gridView.Columns.Add(MakeColumn("Band",    "Band",         50));
+        gridView.Columns.Add(MakeColumn("Spotter", "Spotter",      80));
         gridView.Columns.Add(MakeColumn("Comment", "ShortMessage", 200));
         _spotList.View = gridView;
 
@@ -225,10 +229,8 @@ public class DxClusterWindow : Window
 
         Content = root;
 
-        // Wire up events
         _cluster.OnSpotsUpdated += OnSpotsUpdated;
 
-        // Load or fetch
         if (_cluster.Spots.Count > 0)
         {
             OnSpotsUpdated(_cluster.Spots);
@@ -245,7 +247,6 @@ public class DxClusterWindow : Window
 
         UpdateFreqDisplay();
 
-        // Auto-band timer — polls radio freq every 2s when enabled
         _autoBandTimer = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(2)
@@ -259,61 +260,43 @@ public class DxClusterWindow : Window
         };
     }
 
-    // ── Mode parsing from message text ──
+    // ── Mode parsing ──
     private static readonly string[] KnownModes = { "FT8", "FT4", "CW", "SSB", "RTTY", "FM", "AM", "C4FM", "DSTAR", "DMR", "JT65", "JT9", "PSK", "SSTV", "JS8" };
 
-    /// <summary>Extract mode from the spot message text, falling back to frequency-based guess</summary>
     private static string ParseMode(DXSpot spot)
     {
-        // First try to find a known mode keyword in the message
         if (!string.IsNullOrEmpty(spot.Message))
         {
             var msgUpper = spot.Message.ToUpperInvariant();
             foreach (var mode in KnownModes)
-            {
-                if (msgUpper.Contains(mode))
-                    return mode;
-            }
-            // Check for "POTA" or "SOTA" with band plan guess
+                if (msgUpper.Contains(mode)) return mode;
             if (msgUpper.Contains("POTA") || msgUpper.Contains("SOTA") || msgUpper.Contains("WWFF"))
-            {
-                // Activations: if freq is in CW segment, CW; otherwise SSB
-                var freqKHz = spot.Frequency;
-                if (IsCWFrequency(freqKHz)) return "CW";
-                return "SSB";
-            }
+                return IsCWFrequency(spot.Frequency) ? "CW" : "SSB";
         }
 
-        // Fall back to frequency-based guess
         var fKHz = spot.Frequency;
         if (IsFT8Frequency(fKHz)) return "FT8";
         if (IsFT4Frequency(fKHz)) return "FT4";
         if (IsCWFrequency(fKHz)) return "CW";
-
-        // Default to SSB for phone segments
         return "SSB";
     }
 
     private static bool IsFT8Frequency(double kHz)
     {
-        // Common FT8 dial frequencies in kHz
         double[] ft8 = { 1840, 3573, 5357, 7074, 10136, 14074, 18100, 21074, 24915, 28074, 50313, 144174 };
-        foreach (var f in ft8)
-            if (Math.Abs(kHz - f) < 3) return true;
+        foreach (var f in ft8) if (Math.Abs(kHz - f) < 3) return true;
         return false;
     }
 
     private static bool IsFT4Frequency(double kHz)
     {
         double[] ft4 = { 3575.5, 7047.5, 10140, 14080, 18104, 21140, 24919, 28180, 50318 };
-        foreach (var f in ft4)
-            if (Math.Abs(kHz - f) < 3) return true;
+        foreach (var f in ft4) if (Math.Abs(kHz - f) < 3) return true;
         return false;
     }
 
     private static bool IsCWFrequency(double kHz)
     {
-        // CW sub-bands (lower portion of each band)
         (double lo, double hi)[] cwSegs = {
             (1800, 1850), (3500, 3600), (7000, 7060), (10100, 10140),
             (14000, 14070), (18068, 18095), (21000, 21070), (24890, 24915),
@@ -333,8 +316,7 @@ public class DxClusterWindow : Window
             var freq = _radio.LastFrequency;
             var band = Helpers.BandHelper.GetBand(freq);
             var mode = _radio.LastMode;
-            _freqDisplay.Text = string.Format("{0:N1} kHz | {1} | {2}",
-                freq / 1000.0, band, mode);
+            _freqDisplay.Text = string.Format("{0:N1} kHz | {1} | {2}", freq / 1000.0, band, mode);
         }
         else
         {
@@ -346,10 +328,8 @@ public class DxClusterWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            // Parse mode from message for each spot
             foreach (var spot in spots)
                 spot.Mode = ParseMode(spot);
-
             _allSpots = spots;
             RebuildFilterDropdowns();
             ApplyFilters();
@@ -359,28 +339,24 @@ public class DxClusterWindow : Window
 
     private void RebuildFilterDropdowns()
     {
-        // Save current selections
         var curBand = _bandFilter.SelectedItem as string ?? "All";
         var curMode = _modeFilter.SelectedItem as string ?? "All";
 
-        // Build band list from actual data
         var bands = _allSpots
             .Select(s => s.Band)
             .Where(b => !string.IsNullOrWhiteSpace(b))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(b => BandSortKey(b))
+            .OrderBy(BandSortKey)
             .ToList();
 
         _bandFilter.SelectionChanged -= Filter_Changed;
         _bandFilter.Items.Clear();
         _bandFilter.Items.Add("All");
         foreach (var b in bands) _bandFilter.Items.Add(b);
-        // Restore selection
         var bandIdx = _bandFilter.Items.IndexOf(curBand);
         _bandFilter.SelectedIndex = bandIdx >= 0 ? bandIdx : 0;
         _bandFilter.SelectionChanged += Filter_Changed;
 
-        // Build mode list from actual data
         var modes = _allSpots
             .Select(s => s.Mode)
             .Where(m => !string.IsNullOrWhiteSpace(m))
@@ -399,11 +375,10 @@ public class DxClusterWindow : Window
 
     private static int BandSortKey(string band)
     {
-        // Sort bands by wavelength descending (160m first, 70cm last)
-        var numStr = new string(band.TakeWhile(c => char.IsDigit(c)).ToArray());
+        var numStr = new string(band.TakeWhile(char.IsDigit).ToArray());
         if (!int.TryParse(numStr, out var num)) return 9999;
         if (band.EndsWith("cm", StringComparison.OrdinalIgnoreCase)) return 10000 + num;
-        return 2000 - num; // "m" bands: 160m=1840, 80m=1920, ..., 2m=1998
+        return 2000 - num;
     }
 
     private void ApplyFilters()
@@ -412,14 +387,10 @@ public class DxClusterWindow : Window
         var mode = _modeFilter.SelectedItem as string ?? "All";
 
         var filtered = _allSpots.AsEnumerable();
-
         if (band != "All")
-            filtered = filtered.Where(s =>
-                s.Band.Equals(band, StringComparison.OrdinalIgnoreCase));
-
+            filtered = filtered.Where(s => s.Band.Equals(band, StringComparison.OrdinalIgnoreCase));
         if (mode != "All")
-            filtered = filtered.Where(s =>
-                s.Mode.Equals(mode, StringComparison.OrdinalIgnoreCase));
+            filtered = filtered.Where(s => s.Mode.Equals(mode, StringComparison.OrdinalIgnoreCase));
 
         var list = filtered.ToList();
         _spotList.ItemsSource = list;
@@ -430,10 +401,8 @@ public class DxClusterWindow : Window
 
     private void Filter_Changed(object sender, SelectionChangedEventArgs e)
     {
-        // If user manually changed band dropdown, disable auto band
         if (sender == _bandFilter && _autoBandEnabled)
         {
-            // Only disable if it wasn't triggered by auto-band itself
             var selected = _bandFilter.SelectedItem as string ?? "All";
             if (!selected.Equals(_lastAutoBand, StringComparison.OrdinalIgnoreCase))
                 SetAutoBand(false);
@@ -446,19 +415,14 @@ public class DxClusterWindow : Window
         if (!_radio.Connected) return;
         var band = Helpers.BandHelper.GetBand(_radio.LastFrequency);
         if (string.IsNullOrEmpty(band)) return;
-
-        SetAutoBand(false); // manual selection disables auto
+        SetAutoBand(false);
         SelectBandInDropdown(band);
     }
 
     private void AutoBand_Click(object sender, RoutedEventArgs e)
     {
         SetAutoBand(!_autoBandEnabled);
-        if (_autoBandEnabled)
-        {
-            // Immediately apply current band
-            AutoBandTimer_Tick(this, EventArgs.Empty);
-        }
+        if (_autoBandEnabled) AutoBandTimer_Tick(this, EventArgs.Empty);
     }
 
     private void SetAutoBand(bool enabled)
@@ -484,14 +448,10 @@ public class DxClusterWindow : Window
     private void AutoBandTimer_Tick(object? sender, EventArgs e)
     {
         if (!_autoBandEnabled || !_radio.Connected) return;
-
         var band = Helpers.BandHelper.GetBand(_radio.LastFrequency);
         if (string.IsNullOrEmpty(band)) return;
-
-        // Only update if band actually changed
         if (band.Equals(_lastAutoBand, StringComparison.OrdinalIgnoreCase)) return;
         _lastAutoBand = band;
-
         SelectBandInDropdown(band);
         UpdateFreqDisplay();
     }
@@ -513,8 +473,7 @@ public class DxClusterWindow : Window
         _refreshBtn.IsEnabled = false;
         _statusBar.Text = "Fetching...";
         var result = await _cluster.FetchNow();
-        if (!result.StartsWith("OK"))
-            _statusBar.Text = result;
+        if (!result.StartsWith("OK")) _statusBar.Text = result;
         _refreshBtn.IsEnabled = true;
         UpdateFreqDisplay();
     }
@@ -531,32 +490,26 @@ public class DxClusterWindow : Window
 
     // ── UI Helpers ──
 
-    private static Button MakeButton(string text)
+    private static Button MakeButton(string text) => new Button
     {
-        return new Button
-        {
-            Content = text,
-            Padding = new Thickness(10, 3, 10, 3),
-            Background = new SolidColorBrush(InputBg),
-            Foreground = Brushes.White,
-            BorderBrush = new SolidColorBrush(BorderColor),
-            BorderThickness = new Thickness(1),
-            Cursor = Cursors.Hand,
-            FontSize = 11.5
-        };
-    }
+        Content = text,
+        Padding = new Thickness(10, 3, 10, 3),
+        Background = new SolidColorBrush(InputBg),
+        Foreground = Brushes.White,
+        BorderBrush = new SolidColorBrush(BorderColor),
+        BorderThickness = new Thickness(1),
+        Cursor = Cursors.Hand,
+        FontSize = 11.5
+    };
 
-    private static TextBlock MakeLabel(string text)
+    private static TextBlock MakeLabel(string text) => new TextBlock
     {
-        return new TextBlock
-        {
-            Text = text,
-            Foreground = new SolidColorBrush(DimText),
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 4, 0),
-            FontSize = 11.5
-        };
-    }
+        Text = text,
+        Foreground = new SolidColorBrush(DimText),
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(8, 0, 4, 0),
+        FontSize = 11.5
+    };
 
     private static ComboBox MakeCombo(string[] items, double width)
     {
@@ -569,19 +522,16 @@ public class DxClusterWindow : Window
             FontSize = 11.5,
             VerticalContentAlignment = VerticalAlignment.Center
         };
-        foreach (var item in items)
-            cb.Items.Add(item);
+        foreach (var item in items) cb.Items.Add(item);
         cb.SelectedIndex = 0;
         return cb;
     }
 
-    private static GridViewColumn MakeColumn(string header, string binding, double width)
-    {
-        return new GridViewColumn
+    private static GridViewColumn MakeColumn(string header, string binding, double width) =>
+        new GridViewColumn
         {
             Header = header,
             Width = width,
             DisplayMemberBinding = new Binding(binding)
         };
-    }
 }

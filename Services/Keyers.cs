@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Threading;
 using NAudio.Wave;
@@ -16,6 +17,12 @@ public class CwKeyer
     public void SendText(string text) => _radio.SendCWText(text);
     public void PlayMemory(int slot) => _radio.PlayCWMemory(slot);
     public void StopPlayback() => _radio.StopCWMemory();
+
+    /// <summary>
+    /// Returns true if the radio's CW memory playback is active.
+    /// Implemented via the KY; CAT query — the FTDX-101 responds KY1; during playback,
+    /// KY0; when idle. Falls back to false if the radio is not connected.
+    /// </summary>
     public bool IsPlaying() => _radio.GetCWMemoryStatus();
 
     public void SetMemoryText(int slot, string text)

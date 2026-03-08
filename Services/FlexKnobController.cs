@@ -47,13 +47,20 @@ public class FlexKnobController : IDisposable
     // Throttle
     private int _pendingSteps;
     private long _lastApplyMs;
-    private Timer? _applyTimer;
-    private const int ApplyIntervalMs = 15; // Fast response for knob feel
+
+    // WARNING FIX: Pre-allocate the apply timer once instead of creating and disposing
+    // a new Timer on every knob tick that arrives within ApplyIntervalMs.
+    // At fast VFO sweep speeds (100+ ticks/sec) the original Dispose/new pattern
+    // generated significant GC pressure. Use Change() to reschedule instead.
+    private readonly Timer _applyTimer;
+    private const int ApplyIntervalMs = 15;
 
     public FlexKnobController(RadioController radio, Config config)
     {
         _radio = radio;
         _config = config;
+        // Pre-allocate in a dormant state; Change() activates it on demand
+        _applyTimer = new Timer(_ => ApplyPendingSteps(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     /// <summary>Connect to FlexKnob - matches Go: serial.Open() + goroutine readLoop</summary>
@@ -83,29 +90,26 @@ public class FlexKnobController : IDisposable
             // IMPORTANT: Do NOT set DtrEnable=true - it causes Arduino-based devices to reset!
             _port = new SerialPort
             {
-                PortName = _config.FlexknobPort,
-                BaudRate = _config.FlexknobBaud,
-                DataBits = 8,
-                Parity = Parity.None,
-                StopBits = StopBits.One,
-                Handshake = Handshake.None,
-                ReadTimeout = 100,     // Match Go: port.SetReadTimeout(100ms)
-                WriteTimeout = 500,
-                DtrEnable = false,     // Don't toggle DTR (avoids Arduino reset)
-                RtsEnable = false,     // Don't toggle RTS
+                PortName      = _config.FlexknobPort,
+                BaudRate      = _config.FlexknobBaud,
+                DataBits      = 8,
+                Parity        = Parity.None,
+                StopBits      = StopBits.One,
+                Handshake     = Handshake.None,
+                ReadTimeout   = 100,
+                WriteTimeout  = 500,
+                DtrEnable     = false,
+                RtsEnable     = false,
                 ReadBufferSize = 4096,
-                Encoding = Encoding.ASCII
+                Encoding      = Encoding.ASCII
             };
 
             _port.Open();
-
-            // Small delay to let device settle (like Go's goroutine scheduling delay)
             Thread.Sleep(200);
 
             lock (_lock) { IsConnected = true; }
             _running = true;
 
-            // Start read thread (matches Go: go f.readLoop())
             _readThread = new Thread(ReadLoop)
             {
                 Name = "FlexKnob-Reader",
@@ -121,24 +125,23 @@ public class FlexKnobController : IDisposable
             Logger.Error("FLEXKNOB", "Connect FAILED: {0}", ex.Message);
             Logger.Error("FLEXKNOB", "  Type: {0}", ex.GetType().Name);
             OnStatusChanged?.Invoke("Error: " + ex.Message);
-            // Clean up on failure
             try { _port?.Close(); } catch { }
             _port = null;
         }
     }
 
-    /// <summary>Disconnect from FlexKnob</summary>
     public void Disconnect()
     {
         _running = false;
         lock (_lock) { IsConnected = false; }
 
-        // Close port (will cause Read() to throw, breaking the read loop)
+        // Suspend the apply timer
+        _applyTimer.Change(Timeout.Infinite, Timeout.Infinite);
+
         try { _port?.Close(); } catch { }
         try { _port?.Dispose(); } catch { }
         _port = null;
 
-        // Wait for read thread to finish
         try { _readThread?.Join(1000); } catch { }
         _readThread = null;
 
@@ -148,10 +151,6 @@ public class FlexKnobController : IDisposable
 
     // ========== READ LOOP ==========
 
-    /// <summary>
-    /// Polling read loop on dedicated thread.
-    /// Checks BytesToRead before calling Read() to avoid costly TimeoutExceptions.
-    /// </summary>
     private void ReadLoop()
     {
         Logger.Info("FLEXKNOB", "Read loop started on {0}", _config.FlexknobPort);
@@ -165,7 +164,6 @@ public class FlexKnobController : IDisposable
         {
             while (_running)
             {
-                // Check connection state
                 bool connected;
                 SerialPort? port;
                 lock (_lock) { connected = IsConnected; }
@@ -178,38 +176,30 @@ public class FlexKnobController : IDisposable
                     break;
                 }
 
-                // Check if data is available BEFORE reading (avoids TimeoutException)
                 int avail;
                 try { avail = port.BytesToRead; }
-                catch { break; } // port gone
+                catch { break; }
 
                 if (avail <= 0)
                 {
-                    // No data — sleep briefly and check again
                     Thread.Sleep(5);
                     continue;
                 }
 
-                // Read available bytes
                 int n;
                 try
                 {
                     n = port.Read(buf, 0, Math.Min(buf.Length, avail));
                 }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
+                catch (OperationCanceledException) { break; }
                 catch (IOException)
                 {
-                    if (_running)
-                        Logger.Warn("FLEXKNOB", "IO error (port closed?)");
+                    if (_running) Logger.Warn("FLEXKNOB", "IO error (port closed?)");
                     break;
                 }
                 catch (Exception ex)
                 {
-                    if (_running)
-                        Logger.Warn("FLEXKNOB", "Read error: {0} ({1})", ex.Message, ex.GetType().Name);
+                    if (_running) Logger.Warn("FLEXKNOB", "Read error: {0} ({1})", ex.Message, ex.GetType().Name);
                     break;
                 }
 
@@ -217,33 +207,24 @@ public class FlexKnobController : IDisposable
 
                 totalBytesRead += n;
 
-                // Log raw data at Debug level (verbose - only needed for troubleshooting)
                 var rawStr = Encoding.ASCII.GetString(buf, 0, n);
                 var hexStr = BitConverter.ToString(buf, 0, n).Replace("-", " ");
                 Logger.Debug("FLEXKNOB", ">>> Raw ({0} bytes, total={1}): hex=[{2}] str=\"{3}\"",
                     n, totalBytesRead, hexStr, rawStr.Replace("\r", "\\r").Replace("\n", "\\n"));
 
-                // Accumulate bytes (matches Go: lineBuffer = append(lineBuffer, buf[:n]...))
-                for (int i = 0; i < n; i++)
-                    lineBuffer.Add(buf[i]);
+                for (int i = 0; i < n; i++) lineBuffer.Add(buf[i]);
 
-                // Process complete commands - split on semicolons, newlines, carriage returns
                 while (true)
                 {
                     int idx = -1;
                     for (int i = 0; i < lineBuffer.Count; i++)
                     {
                         byte b = lineBuffer[i];
-                        if (b == ';' || b == '\n' || b == '\r')
-                        {
-                            idx = i;
-                            break;
-                        }
+                        if (b == ';' || b == '\n' || b == '\r') { idx = i; break; }
                     }
 
                     if (idx == -1)
                     {
-                        // No delimiter found - overflow handling (matches Go: len(lineBuffer) > 50)
                         if (lineBuffer.Count > 50)
                         {
                             var overflow = Encoding.ASCII.GetString(lineBuffer.ToArray()).Trim();
@@ -251,17 +232,12 @@ public class FlexKnobController : IDisposable
                                 lineBuffer.Count, overflow);
                             lineBuffer.Clear();
 
-                            // Try splitting on semicolons within the overflow
                             if (overflow.Contains(';'))
                             {
                                 foreach (var part in overflow.Split(';', StringSplitOptions.RemoveEmptyEntries))
                                 {
                                     var cmd = part.Trim();
-                                    if (!string.IsNullOrEmpty(cmd))
-                                    {
-                                        totalCommands++;
-                                        ProcessCommand(cmd, totalCommands);
-                                    }
+                                    if (!string.IsNullOrEmpty(cmd)) { totalCommands++; ProcessCommand(cmd, totalCommands); }
                                 }
                             }
                             else if (!string.IsNullOrEmpty(overflow))
@@ -273,16 +249,11 @@ public class FlexKnobController : IDisposable
                         break;
                     }
 
-                    // Extract command before delimiter
                     var cmdBytes = lineBuffer.GetRange(0, idx).ToArray();
-                    lineBuffer.RemoveRange(0, idx + 1); // Remove command + delimiter
+                    lineBuffer.RemoveRange(0, idx + 1);
 
                     var command = Encoding.ASCII.GetString(cmdBytes).Trim();
-                    if (!string.IsNullOrEmpty(command))
-                    {
-                        totalCommands++;
-                        ProcessCommand(command, totalCommands);
-                    }
+                    if (!string.IsNullOrEmpty(command)) { totalCommands++; ProcessCommand(command, totalCommands); }
                 }
             }
         }
@@ -294,7 +265,6 @@ public class FlexKnobController : IDisposable
 
         Logger.Info("FLEXKNOB", "Read loop exited (total: {0} bytes, {1} commands)", totalBytesRead, totalCommands);
 
-        // Mark disconnected if we exit unexpectedly
         lock (_lock)
         {
             if (IsConnected)
@@ -307,39 +277,30 @@ public class FlexKnobController : IDisposable
 
     // ========== COMMAND PARSING ==========
 
-    /// <summary>Parse and dispatch a single command. Logged at Info for first 100, Debug after.</summary>
     private void ProcessCommand(string input, int cmdNum)
     {
         input = input.Trim().ToUpper();
         if (string.IsNullOrEmpty(input)) return;
 
-        // Log at Info level for first 10 commands (diagnostic), then Debug
         if (cmdNum <= 10)
             Logger.Info("FLEXKNOB", "CMD #{0}: \"{1}\"", cmdNum, input);
         else
             Logger.Debug("FLEXKNOB", "CMD: \"{0}\"", input);
 
-        // ===== FlexKnob native protocol =====
-
-        // U = up 1, U02 = up 2, U03 = up 3
         if (input[0] == 'U' && (input.Length == 1 || char.IsDigit(input[1])))
         {
             int steps = 1;
             if (input.Length > 1 && int.TryParse(input[1..], out var s) && s > 0) steps = s;
-            HandleRotation(steps);
-            return;
+            HandleRotation(steps); return;
         }
 
-        // D = down 1, D02 = down 2, D03 = down 3
         if (input[0] == 'D' && (input.Length == 1 || char.IsDigit(input[1])))
         {
             int steps = 1;
             if (input.Length > 1 && int.TryParse(input[1..], out var s) && s > 0) steps = s;
-            HandleRotation(-steps);
-            return;
+            HandleRotation(-steps); return;
         }
 
-        // X1S/X2S/X3S = button short, X1L/X2L/X3L = button long
         if (input[0] == 'X' && input.Length >= 3 && char.IsDigit(input[1]))
         {
             int btn = input[1] - '0';
@@ -347,29 +308,23 @@ public class FlexKnobController : IDisposable
             if (btn >= 1) { HandleButton(btn, longPress); return; }
         }
 
-        // ===== Legacy protocols (matching Go processInput exactly) =====
-
         if (input == "L") { HandleRotation(-1); return; }
-        if (input == "R") { HandleRotation(1); return; }
+        if (input == "R") { HandleRotation(1);  return; }
 
-        if (input.StartsWith("E+") || input.StartsWith("+"))
-        { HandleRotation(ParseSteps(input)); return; }
-        if (input.StartsWith("E-") || input.StartsWith("-"))
-        { HandleRotation(-ParseSteps(input)); return; }
+        if (input.StartsWith("E+") || input.StartsWith("+")) { HandleRotation(ParseSteps(input));  return; }
+        if (input.StartsWith("E-") || input.StartsWith("-")) { HandleRotation(-ParseSteps(input)); return; }
 
-        if (input == "CW") { HandleRotation(1); return; }
+        if (input == "CW")  { HandleRotation(1);  return; }
         if (input == "CCW") { HandleRotation(-1); return; }
 
-        // Button: B1, B2, BTN1, BTN2
         if (input.StartsWith("BTN") || (input.StartsWith("B") && input.Length >= 2 && char.IsDigit(input[1])))
-        { HandleButton(ParseButtonNumber(input), false); return; }
+            { HandleButton(ParseButtonNumber(input), false); return; }
 
         if (input is "P" or "PRESS" or "PUSH" or "BUTTON")
-        { HandleButton(1, false); return; }
+            { HandleButton(1, false); return; }
 
-        // Raw number = rotation steps
         if (int.TryParse(input, out var rawSteps) && rawSteps != 0)
-        { HandleRotation(rawSteps); return; }
+            { HandleRotation(rawSteps); return; }
 
         Logger.Info("FLEXKNOB", "Unknown command: \"{0}\"", input);
     }
@@ -382,7 +337,6 @@ public class FlexKnobController : IDisposable
 
     private static int ParseButtonNumber(string input)
     {
-        // Match Go: TrimLeft("BTN") then TrimLeft("B") then TrimLeft("R")
         var numStr = input;
         if (numStr.StartsWith("BTN")) numStr = numStr[3..];
         else if (numStr.StartsWith("B")) numStr = numStr[1..];
@@ -397,17 +351,10 @@ public class FlexKnobController : IDisposable
 
         switch (Mode)
         {
-            case KnobMode.Frequency:
-                HandleFrequencyRotation(steps);
-                break;
-            case KnobMode.Volume:
-                HandleVolumeRotation(steps);
-                break;
-            case KnobMode.RIT:
-                HandleRITRotation(steps);
-                break;
-            case KnobMode.Custom:
-                break;
+            case KnobMode.Frequency: HandleFrequencyRotation(steps); break;
+            case KnobMode.Volume:    HandleVolumeRotation(steps);    break;
+            case KnobMode.RIT:       HandleRITRotation(steps);       break;
+            case KnobMode.Custom:    break;
         }
 
         var dir = steps > 0 ? "CW" : "CCW";
@@ -423,14 +370,15 @@ public class FlexKnobController : IDisposable
         var nowMs = Environment.TickCount64;
         if (nowMs - Interlocked.Read(ref _lastApplyMs) >= ApplyIntervalMs)
         {
-            // Enough time passed — apply immediately
+            // Enough time has passed — apply immediately
             ApplyPendingSteps();
         }
         else
         {
-            // Schedule a single deferred apply (reuse timer, don't spawn tasks)
-            _applyTimer?.Dispose();
-            _applyTimer = new Timer(_ => ApplyPendingSteps(), null, ApplyIntervalMs, Timeout.Infinite);
+            // WARNING FIX: Reschedule the pre-allocated timer with Change() rather than
+            // Dispose/new on every tick. Eliminates continuous GC pressure during fast
+            // VFO sweeps where ticks arrive faster than ApplyIntervalMs.
+            _applyTimer.Change(ApplyIntervalMs, Timeout.Infinite);
         }
     }
 
@@ -452,7 +400,7 @@ public class FlexKnobController : IDisposable
     private void HandleVolumeRotation(int steps)
     {
         if (!_radio.Connected) return;
-        if (_cachedVolume < 0) _cachedVolume = _radio.GetAFGain(); // first time only
+        if (_cachedVolume < 0) _cachedVolume = _radio.GetAFGain();
         _cachedVolume = Math.Clamp(_cachedVolume + steps * 13, 0, 255);
         _radio.SetAFGain(_cachedVolume);
     }
@@ -531,7 +479,17 @@ public class FlexKnobController : IDisposable
     public void SetStep(int hz)
     {
         var idx = Array.IndexOf(StepSizes, hz);
-        if (idx >= 0) _stepIndex = idx;
+        if (idx >= 0)
+        {
+            _stepIndex = idx;
+        }
+        else
+        {
+            // CLEANUP FIX: Log unrecognized step values so misconfigured defaults are visible
+            // rather than silently being ignored. Valid values: 10, 50, 100, 500, 1000, 5000, 10000
+            Logger.Warn("FLEXKNOB", "SetStep({0}) — not a valid step size, ignoring. Valid: {1}",
+                hz, string.Join(", ", StepSizes));
+        }
     }
 
     // ========== STATUS ==========
@@ -539,14 +497,14 @@ public class FlexKnobController : IDisposable
     public Dictionary<string, object> Status() => new()
     {
         ["connected"] = IsConnected,
-        ["mode"] = ModeName,
+        ["mode"]      = ModeName,
         ["step_size"] = StepHz,
-        ["port"] = _config.FlexknobPort
+        ["port"]      = _config.FlexknobPort
     };
 
     public void Dispose()
     {
-        _applyTimer?.Dispose();
+        _applyTimer.Dispose();
         Disconnect();
         GC.SuppressFinalize(this);
     }

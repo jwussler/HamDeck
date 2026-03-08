@@ -242,6 +242,7 @@
                             <Button Content="Lock" Style="{StaticResource HamButton}" Click="ToggleLock_Click" Margin="2"/>
                             <Button Content="AGC" Style="{StaticResource HamButton}" Click="CycleAGC_Click" Margin="2"/>
                             <Button Content="ANT" Style="{StaticResource HamButton}" Click="ToggleAntenna_Click" Margin="2"/>
+                            <Button x:Name="RxAntBtn" Content="RX ANT" Style="{StaticResource HamButton}" Click="RxAnt_Click" Margin="2"/>
                         </WrapPanel>
                     </StackPanel>
                 </Border>
