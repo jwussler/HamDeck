@@ -34,3 +34,7 @@ If Windows blocks the app:
 - Or: Windows Security → App & browser control → Smart App Control → Off
 
 73 de WA0O
+
+## License
+
+MIT License � see [LICENSE](LICENSE) for details. 73 de WA0O!
