@@ -1,7 +1,7 @@
 <Window x:Class="HamDeck.Views.SettingsDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="HamDeck Settings" Width="520" Height="620"
+        Title="HamDeck Settings" Width="520" Height="680"
         Background="{StaticResource DarkBgBrush}"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <Grid Margin="16">
@@ -32,6 +32,17 @@
                              Background="{StaticResource InputBgBrush}" Foreground="White"/>
                 </Grid>
 
+                <!-- TCP CAT Proxy -->
+                <TextBlock Text="TCP CAT Proxy (N1MM / Logger+)" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <CheckBox x:Name="CatProxyEnabledBox" Content="Enable TCP CAT Proxy" Foreground="White" Margin="0,0,0,4"/>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Proxy Port:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="CatProxyPortBox" Grid.Column="1" Width="80" HorizontalAlignment="Left"
+                             Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+                <TextBlock Text="In N1MM: Configure Ports → Port = TCP → Host: 127.0.0.1 → Port: (above)"
+                           FontSize="10.5" Foreground="{StaticResource DimTextBrush}" Margin="0,0,0,4"/>
+
                 <!-- Wavelog -->
                 <TextBlock Text="Wavelog Integration" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
                 <CheckBox x:Name="WavelogEnabledBox" Content="Enable Wavelog" Foreground="White" Margin="0,0,0,4"/>
@@ -58,6 +69,19 @@
                 <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
                     <TextBlock Text="TGXL Port:" VerticalAlignment="Center"/>
                     <TextBox x:Name="TgxlPortBox" Grid.Column="1" Width="80" HorizontalAlignment="Left"
+                             Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+
+                <!-- KMTronic -->
+                <TextBlock Text="KMTronic RX Antenna Relay" FontSize="16" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" Margin="0,16,0,8"/>
+                <CheckBox x:Name="KmtronicEnabledBox" Content="Enable KMTronic relay" Foreground="White" Margin="0,0,0,4"/>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Host:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="KmtronicHostBox" Grid.Column="1" Background="{StaticResource InputBgBrush}" Foreground="White"/>
+                </Grid>
+                <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Port:" VerticalAlignment="Center"/>
+                    <TextBox x:Name="KmtronicPortBox" Grid.Column="1" Width="80" HorizontalAlignment="Left"
                              Background="{StaticResource InputBgBrush}" Foreground="White"/>
                 </Grid>
 

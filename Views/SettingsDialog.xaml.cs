@@ -32,6 +32,10 @@ public partial class SettingsDialog : Window
         ApiEnabledBox.IsChecked = Config.APIEnabled;
         ApiPortBox.Text = Config.APIPort.ToString();
 
+        // TCP CAT Proxy
+        CatProxyEnabledBox.IsChecked = Config.CatProxyEnabled;
+        CatProxyPortBox.Text = Config.CatProxyPort.ToString();
+
         // Wavelog
         WavelogEnabledBox.IsChecked = Config.WavelogEnabled;
         WavelogUrlBox.Text = Config.WavelogURL;
@@ -41,6 +45,11 @@ public partial class SettingsDialog : Window
         // TG-XL
         TgxlHostBox.Text = Config.TGXLHost;
         TgxlPortBox.Text = Config.TGXLPort.ToString();
+
+        // KMTronic
+        KmtronicEnabledBox.IsChecked = Config.KmtronicEnabled;
+        KmtronicHostBox.Text = Config.KmtronicHost;
+        KmtronicPortBox.Text = Config.KmtronicPort.ToString();
 
         // Cluster
         ClusterEnabledBox.IsChecked = Config.ClusterEnabled;
@@ -74,6 +83,9 @@ public partial class SettingsDialog : Window
         Config.APIEnabled = ApiEnabledBox.IsChecked == true;
         if (int.TryParse(ApiPortBox.Text, out var port)) Config.APIPort = port;
 
+        Config.CatProxyEnabled = CatProxyEnabledBox.IsChecked == true;
+        if (int.TryParse(CatProxyPortBox.Text, out var proxyPort)) Config.CatProxyPort = proxyPort;
+
         Config.WavelogEnabled = WavelogEnabledBox.IsChecked == true;
         Config.WavelogURL = WavelogUrlBox.Text;
         Config.WavelogAPIKey = WavelogKeyBox.Text;
@@ -81,6 +93,10 @@ public partial class SettingsDialog : Window
 
         Config.TGXLHost = TgxlHostBox.Text;
         if (int.TryParse(TgxlPortBox.Text, out var tp)) Config.TGXLPort = tp;
+
+        Config.KmtronicEnabled = KmtronicEnabledBox.IsChecked == true;
+        Config.KmtronicHost = KmtronicHostBox.Text;
+        if (int.TryParse(KmtronicPortBox.Text, out var kp)) Config.KmtronicPort = kp;
 
         Config.ClusterEnabled = ClusterEnabledBox.IsChecked == true;
         Config.ClusterAPIURL = ClusterUrlBox.Text;

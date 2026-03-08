@@ -38,9 +38,18 @@ public class Config
     [JsonPropertyName("api_port")] public int APIPort { get; set; } = 5001;
     [JsonPropertyName("api_enabled")] public bool APIEnabled { get; set; } = true;
 
+    // TCP CAT Proxy settings (for N1MM and other loggers)
+    [JsonPropertyName("cat_proxy_enabled")] public bool CatProxyEnabled { get; set; } = false;
+    [JsonPropertyName("cat_proxy_port")] public int CatProxyPort { get; set; } = 4532;
+
     // TG-XL Tuner settings
     [JsonPropertyName("tgxl_host")] public string TGXLHost { get; set; } = "192.168.40.51";
     [JsonPropertyName("tgxl_port")] public int TGXLPort { get; set; } = 9010;
+
+    // KMTronic RX antenna relay settings
+    [JsonPropertyName("kmtronic_host")] public string KmtronicHost { get; set; } = "192.168.40.69";
+    [JsonPropertyName("kmtronic_port")] public int KmtronicPort { get; set; } = 12345;
+    [JsonPropertyName("kmtronic_enabled")] public bool KmtronicEnabled { get; set; } = true;
 
     // Wavelog settings
     [JsonPropertyName("wavelog_url")] public string WavelogURL { get; set; } = "";
@@ -127,7 +136,9 @@ public class Config
         if (PTTRecordSeconds == 0) PTTRecordSeconds = 60;
         if (PTTQSYThresholdKHz == 0) PTTQSYThresholdKHz = 10;
         if (APIPort == 0) APIPort = 5001;
+        if (CatProxyPort == 0) CatProxyPort = 4532;
         if (TGXLPort == 0) TGXLPort = 9010;
+        if (KmtronicPort == 0) KmtronicPort = 12345;
         if (WavelogStationID == 0) WavelogStationID = 1;
         if (ClusterPollInterval == 0) ClusterPollInterval = 30;
         if (string.IsNullOrEmpty(ClusterAPIURL)) ClusterAPIURL = "https://api.wa0o.com/dxcache/spots";
@@ -143,6 +154,7 @@ public class Config
         int[] validBauds = [4800, 9600, 19200, 38400, 57600, 115200];
         if (!validBauds.Contains(RadioBaud)) errors.Add("Invalid baud rate");
         if (APIPort < 1 || APIPort > 65535) errors.Add("API port must be 1-65535");
+        if (CatProxyPort < 1 || CatProxyPort > 65535) errors.Add("CAT proxy port must be 1-65535");
         int[] validSR = [8000, 11025, 22050, 44100, 48000];
         if (!validSR.Contains(RecordSampleRate)) errors.Add("Invalid sample rate");
         if (WavelogEnabled && string.IsNullOrEmpty(WavelogURL)) errors.Add("Wavelog URL required when enabled");

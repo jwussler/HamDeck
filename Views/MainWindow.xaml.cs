@@ -24,12 +24,14 @@ public partial class MainWindow : Window
     private readonly WaveLogServer _wavelog;
     private readonly TgxlTuner _tgxl;
     private readonly AmpTuner _amp;
+    private readonly KmtronicService? _kmtronic;
     private readonly DxClusterClient _cluster;
     private readonly FlexKnobController _flexknob;
     private readonly CwKeyer _cwKeyer;
     private readonly VoiceKeyer _voiceKeyer;
     private readonly SessionStats _stats = new();
     private readonly DispatcherTimer _updateTimer;
+    private TcpCatProxy? _catProxy;
 
     private bool _running = true;
     private bool _forceExit;
@@ -70,6 +72,12 @@ public partial class MainWindow : Window
         _recorder = new AudioRecorder(_radio, _config);
         _tgxl = new TgxlTuner(_radio, _config);
         _amp = new AmpTuner(_radio);
+        _kmtronic = _config.KmtronicEnabled
+            ? new KmtronicService(_config.KmtronicHost, _config.KmtronicPort)
+            : null;
+
+        if (_kmtronic != null)
+            Logger.Info("MAIN", "KMTronic relay at {0}:{1}", _config.KmtronicHost, _config.KmtronicPort);
         _cluster = new DxClusterClient(_radio, _config);
         _flexknob = new FlexKnobController(_radio, _config);
         _cwKeyer = new CwKeyer(_radio);
@@ -96,8 +104,15 @@ public partial class MainWindow : Window
             FlexConnBtn.Content = _flexknob.IsConnected ? "Disconnect" : "Connect";
         });
 
-        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp);
+        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic);
         if (_config.APIEnabled) _api.Start();
+
+        // TCP CAT Proxy for N1MM and external loggers
+        if (_config.CatProxyEnabled)
+        {
+            _catProxy = new TcpCatProxy(_radio, _config.CatProxyPort);
+            _catProxy.Start();
+        }
 
         _wavelog = new WaveLogServer(_radio, _config);
         _wavelog.Start();
@@ -231,6 +246,10 @@ public partial class MainWindow : Window
     private void UpdateTick(object? sender, EventArgs e)
     {
         if (!_running) return;
+
+        // Yield to TCP proxy — if N1MM sent a command in the last 300ms, skip this
+        // poll cycle so the proxy command isn't queued behind 7 serial round-trips
+        if (Environment.TickCount64 - _radio.LastProxyActivityMs < 300) return;
 
         // ===== DISCONNECTED STATE =====
         if (!_radio.Connected)
@@ -712,6 +731,15 @@ public partial class MainWindow : Window
             _config = dlg.Config;
             _config.Save();
             Logger.Info("SETTINGS", "Configuration saved");
+
+            // Restart CAT proxy if its settings changed
+            _catProxy?.Dispose();
+            _catProxy = null;
+            if (_config.CatProxyEnabled)
+            {
+                _catProxy = new TcpCatProxy(_radio, _config.CatProxyPort);
+                _catProxy.Start();
+            }
         }
     }
 
@@ -771,6 +799,8 @@ public partial class MainWindow : Window
         _voiceKeyer.Cleanup();
         _flexknob.Disconnect();
         _cluster.Disconnect();
+        _catProxy?.Dispose();
+        _kmtronic?.Dispose();
         _api.Dispose();
         _radio.Disconnect();
         TrayIcon.Dispose();

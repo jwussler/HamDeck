@@ -96,7 +96,7 @@ public class WaveLogServer : IDisposable
             return;
         }
 
-        WriteJson(resp, new { status = "ok", service = "HamDeck WaveLog Bridge", frequency = _radio.GetFreq(), mode = _radio.GetMode() });
+        WriteJson(resp, new { status = "ok", service = "HamDeck WaveLog Bridge", frequency = _radio.LastFrequency, mode = _radio.LastMode });
     }
 
     private async Task RunWebSocketServer(CancellationToken ct)
@@ -161,9 +161,12 @@ public class WaveLogServer : IDisposable
             await Task.Delay(500, ct);
             if (!_radio.Connected) continue;
 
-            var freq = _radio.GetFreq();
-            var mode = _radio.GetMode();
-            var power = _radio.GetPower();
+            // Use cached values - MainWindow's UpdateTick already calls GetFreq/GetMode
+            // every 500ms so these are always fresh. Avoids doubling serial bus traffic
+            // which was causing collisions when sharing the port with N1MM via VSPD.
+            var freq = _radio.LastFrequency;
+            var mode = _radio.LastMode;
+            var power = _radio.LastPower; // fully cached - no serial hit needed
 
             if (freq != _lastFreq || mode != _lastMode || power != _lastPower)
             {
@@ -206,9 +209,9 @@ public class WaveLogServer : IDisposable
         var status = JsonSerializer.Serialize(new
         {
             type = "radio_status",
-            frequency = _radio.GetFreq(),
-            mode = _radio.GetMode(),
-            power = _radio.GetPower(),
+            frequency = _radio.LastFrequency,
+            mode = _radio.LastMode,
+            power = _lastPower,
             tx = _radio.GetTXStatus()
         });
         var buf = Encoding.UTF8.GetBytes(status);

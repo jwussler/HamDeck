@@ -18,6 +18,10 @@ public class RadioController : IDisposable
     public string PortName { get; private set; } = "";
     public long LastFrequency { get; private set; }
     public string LastMode { get; private set; } = "";
+    public int LastPower { get; private set; }
+
+    /// <summary>Timestamp of last proxy command — polling suppresses itself briefly after proxy activity</summary>
+    public long LastProxyActivityMs { get; private set; }
 
     // ========== CONNECTION ==========
 
@@ -59,7 +63,6 @@ public class RadioController : IDisposable
         }
         catch
         {
-            // Clean up port on any failure
             try { port.Dispose(); } catch { }
             _port = null;
             throw;
@@ -146,6 +149,39 @@ public class RadioController : IDisposable
         }
     }
 
+    /// <summary>
+    /// Public bridge used by TcpCatProxy to route raw CAT commands through the serial lock.
+    /// Uses an explicit list of Yaesu query commands so set commands are always fire-and-forget.
+    /// </summary>
+    public string SendRaw(string cmd)
+    {
+        if (string.IsNullOrWhiteSpace(cmd)) return "";
+        cmd = cmd.Trim();
+        if (!cmd.EndsWith(";")) cmd += ";";
+
+        // Yaesu query commands — everything else is a set (fire-and-forget)
+        // Queries are the bare opcode + semicolon (no payload digits)
+        var upper = cmd.ToUpper();
+        bool isQuery =
+            upper == "FA;" || upper == "FB;" || upper == "IF;" ||
+            upper == "MD0;" || upper == "TX;" || upper == "PC;" ||
+            upper == "FT;" || upper == "VS;" || upper == "AG0;" ||
+            upper == "RG0;" || upper == "SM0;" || upper == "SM1;" ||
+            upper == "RM1;" || upper == "RM4;" || upper == "RM6;" ||
+            upper == "PA0;" || upper == "RA0;" || upper == "GT0;" ||
+            upper == "NB0;" || upper == "NR0;" || upper == "BC0;" ||
+            upper == "RT;" || upper == "XT;" || upper == "RD;" ||
+            upper == "VX;" || upper == "PR;" || upper == "LK;" ||
+            upper == "KS;" || upper == "KP;" || upper == "BI;" ||
+            upper == "AN0;" || upper == "AN1;" || upper == "SH0;" ||
+            upper == "AC;";
+
+        // Mark proxy activity so the UI polling loop yields briefly
+        LastProxyActivityMs = Environment.TickCount64;
+
+        return Send(cmd, isQuery);
+    }
+
     // ========== FREQUENCY ==========
 
     public long GetFreq()
@@ -183,10 +219,10 @@ public class RadioController : IDisposable
     public void StepFreq(long stepHz)
     {
         var f = LastFrequency;
-        if (f <= 0) f = GetFreq(); // fallback: query once if no cached value
+        if (f <= 0) f = GetFreq();
         if (f <= 0) return;
         var newFreq = f + stepHz;
-        LastFrequency = newFreq; // update cache immediately for next step
+        LastFrequency = newFreq;
         SetFreq(newFreq);
     }
 
@@ -269,8 +305,11 @@ public class RadioController : IDisposable
     {
         var resp = Send("PC;");
         if (resp.StartsWith("PC") && resp.Length >= 5 && int.TryParse(resp[2..5], out var pwr))
+        {
+            LastPower = pwr;
             return pwr;
-        return 0;
+        }
+        return LastPower; // return cached on failure rather than 0
     }
 
     public void SetPower(int watts)
@@ -426,7 +465,7 @@ public class RadioController : IDisposable
     public void PlayCWMemory(int mem) { if (mem >= 1 && mem <= 5) Send($"KY{mem};", false); }
     public void StopCWMemory() => Send("KY0;", false);
     public void SendCWText(string text) => Send($"KM1{text[..Math.Min(text.Length, 50)]};", false);
-    public bool GetCWMemoryStatus() => false; // FTDX-101 doesn't have a CW memory playing query
+    public bool GetCWMemoryStatus() => false;
 
     public int GetCWPitch()
     {
@@ -446,7 +485,6 @@ public class RadioController : IDisposable
     public void RecallMemory(int num) => Send($"MC{num:D3};", false);
     public void SetWidth(int w) => Send($"SH0{w:D2};", false);
 
-    /// <summary>Get TX antenna port (1=ANT1, 2=ANT2). CAT: AN0;</summary>
     public int GetAntenna()
     {
         var resp = Send("AN0;");
@@ -454,20 +492,15 @@ public class RadioController : IDisposable
         return 1;
     }
 
-    /// <summary>Set TX antenna port (1=ANT1, 2=ANT2). CAT: AN01; / AN02;</summary>
     public void SetAntenna(int ant) => Send($"AN0{Math.Clamp(ant, 1, 3)};", false);
-
-    /// <summary>Toggle TX antenna between ANT1 and ANT2.</summary>
     public void ToggleAntenna() => SetAntenna(GetAntenna() == 1 ? 2 : 1);
 
-    /// <summary>Get RX antenna input state. CAT: AN1; returns AN10; (off) or AN11; (on)</summary>
     public bool GetRxAntenna()
     {
         var resp = Send("AN1;");
         return resp.StartsWith("AN1") && resp.Length >= 4 && resp[3] == '1';
     }
 
-    /// <summary>Enable or disable RX ANT input. CAT: AN11; (on) / AN10; (off)</summary>
     public void SetRxAntenna(bool useRxAnt) => Send(useRxAnt ? "AN11;" : "AN10;", false);
 
     // ========== PORT DETECTION ==========
