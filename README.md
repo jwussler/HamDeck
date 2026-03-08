@@ -182,4 +182,4 @@ HamDeck/
 
 ## License
 
-Personal project by WA0O. 73!
+MIT License — see [LICENSE](LICENSE) for details. 73 de WA0O!
