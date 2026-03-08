@@ -4,7 +4,7 @@ By WA0O
 
 ## Installation
 
-1. **Right-click** the zip file → **Properties** → check **Unblock** → OK
+1. **Right-click** the zip file â†’ **Properties** â†’ check **Unblock** â†’ OK
 2. Extract the zip to a folder (e.g. `C:\HamDeck`)
 3. Run **HamDeck.exe**
 4. No .NET installation required - everything is included
@@ -30,11 +30,11 @@ By WA0O
 ## Troubleshooting
 
 If Windows blocks the app:
-- Right-click HamDeck.exe → Properties → Unblock
-- Or: Windows Security → App & browser control → Smart App Control → Off
+- Right-click HamDeck.exe â†’ Properties â†’ Unblock
+- Or: Windows Security â†’ App & browser control â†’ Smart App Control â†’ Off
 
 73 de WA0O
 
 ## License
 
-MIT License � see [LICENSE](LICENSE) for details. 73 de WA0O!
+MIT License — see [LICENSE](LICENSE) for details. 73 de WA0O!
