@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Ports;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -18,11 +17,7 @@ namespace HamDeck.Views;
 
 public partial class MainWindow : Window
 {
-    // WARNING FIX: _config is now readonly — all services hold a reference to this
-    // same object. Use _config.CopyFrom(newConfig) in Settings_Click so every service
-    // automatically sees updated values without a restart. Reassigning _config = dlg.Config
-    // broke ClusterPollInterval, PTTRecordSeconds, AudioDevice, etc. for live services.
-    private readonly Config _config;
+    private Config _config;
     private readonly RadioController _radio;
     private readonly AudioRecorder _recorder;
     private readonly ApiServer _api;
@@ -37,6 +32,7 @@ public partial class MainWindow : Window
     private readonly SessionStats _stats = new();
     private readonly DispatcherTimer _updateTimer;
     private TcpCatProxy? _catProxy;
+    private AudioStreamer? _streamer;
 
     private bool _running = true;
     private bool _forceExit;
@@ -56,14 +52,6 @@ public partial class MainWindow : Window
     private int _autoRecordSeconds;
     private long _autoRecordFreq;
 
-    // v3: All GUI buttons route through the API so behavior matches Stream Deck
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(2) };
-    private void Api(string path) => Task.Run(async () =>
-    {
-        try { await _http.GetAsync($"http://localhost:{_config.APIPort}{path}"); }
-        catch (Exception ex) { Logger.Debug("API-UI", "Call failed: {0} — {1}", path, ex.Message); }
-    });
-
     public MainWindow()
     {
         InitializeComponent();
@@ -73,23 +61,6 @@ public partial class MainWindow : Window
         var logLevel = _config.LogLevel == "debug" ? Services.LogLevel.Debug : Services.LogLevel.Info;
         Logger.Init(logLevel, _config.LogToFile);
         Logger.Info("MAIN", "HamDeck v2.0 (C#) starting");
-
-        // NOTE FIX: Warn the user if a corrupt config was detected on load.
-        // Config.Load() backs it up and returns defaults; we surface that here so the
-        // user isn't silently running with defaults they didn't expect.
-        if (_config.WasLoadedFromCorruptFile)
-        {
-            Logger.Warn("CONFIG", "Config file was corrupt — loaded defaults. A backup was saved to: {0}.corrupt_*", Config.ConfigFile);
-            Dispatcher.BeginInvoke(() =>
-            {
-                MessageBox.Show(
-                    "HamDeck could not read your config file and has loaded defaults.\n\n" +
-                    "A backup of the corrupt file was saved next to config.json.\n\n" +
-                    "Please review your settings.",
-                    "Config Load Error",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-            });
-        }
 
         foreach (var err in _config.Validate())
             Logger.Warn("CONFIG", err);
@@ -134,7 +105,12 @@ public partial class MainWindow : Window
             FlexConnBtn.Content = _flexknob.IsConnected ? "Disconnect" : "Connect";
         });
 
-        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, _cluster, _stats);
+        // Audio streamer (captures audio, WebSocket served via dashboard port)
+        _streamer = new AudioStreamer(_config);
+        _streamer.Start();
+        _recorder.Streamer = _streamer;
+
+        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, streamer: _streamer);
         if (_config.APIEnabled) _api.Start();
 
         // TCP CAT Proxy for N1MM and external loggers
@@ -227,42 +203,20 @@ public partial class MainWindow : Window
         var port = PortSelect.SelectedItem?.ToString();
         if (string.IsNullOrEmpty(port)) { MessageBox.Show("Select a COM port"); return; }
 
-        // WARNING FIX: Move Connect() off the UI thread. _radio.Connect() opens a COM
-        // port with Thread.Sleep(100) + GetFreq() (up to 200ms timeout), freezing the
-        // WPF dispatcher thread on slow or absent ports. Disable UI for feedback.
-        ConnectBtn.IsEnabled = false;
-        ConnStatus.Text = "\u25CF Connecting...";
-        ConnStatus.Foreground = FindResource("WarningBrush") as SolidColorBrush;
-
-        Task.Run(() =>
+        try
         {
-            try
-            {
-                _radio.Connect(port, _config.RadioBaud);
-                Dispatcher.Invoke(() =>
-                {
-                    _config.RadioPort = port;
-                    _config.Save();
-                    _wasConnected = true;
-                    ConnStatus.Text = "\u25CF Connected";
-                    ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
-                    ConnectBtn.Content = "Disconnect";
-                    ConnectBtn.IsEnabled = true;
-                });
-            }
-            catch (Exception ex)
-            {
-                Dispatcher.Invoke(() =>
-                {
-                    ConnStatus.Text = "\u25CF Disconnected";
-                    ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
-                    ConnectBtn.Content = "Connect";
-                    ConnectBtn.IsEnabled = true;
-                    MessageBox.Show($"Connection failed: {ex.Message}", "Error",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                });
-            }
-        });
+            _radio.Connect(port, _config.RadioBaud);
+            _config.RadioPort = port;
+            _config.Save();
+            _wasConnected = true;
+            ConnStatus.Text = "\u25CF Connected";
+            ConnStatus.Foreground = FindResource("SuccessBrush") as SolidColorBrush;
+            ConnectBtn.Content = "Disconnect";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Connection failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void AutoDetect_Click(object sender, RoutedEventArgs e)
@@ -299,6 +253,14 @@ public partial class MainWindow : Window
     {
         if (!_running) return;
 
+        // Yield to TCP proxy — if N1MM sent a command in the last 300ms, skip this
+        // poll cycle so the proxy command isn't queued behind 7 serial round-trips
+        if (Environment.TickCount64 - _radio.LastProxyActivityMs < 300) return;
+
+        // Yield to FlexKnob — during active rotation, skip the poll cycle
+        // so knob commands don't fight with 7 serial round-trips
+        if (_flexknob.IsActive) return;
+
         // ===== DISCONNECTED STATE =====
         if (!_radio.Connected)
         {
@@ -326,6 +288,7 @@ public partial class MainWindow : Window
                 }
                 _lastPTTState = false;
                 _nextReconnectAttempt = DateTime.UtcNow.Add(ReconnectInterval);
+                _streamer?.UpdateStatus(0, "", "", 0, false, false);
             }
 
             if (!_reconnecting && !string.IsNullOrEmpty(_config.RadioPort)
@@ -373,57 +336,19 @@ public partial class MainWindow : Window
         _wasConnected = true;
 
         // ===== CONNECTED STATE =====
-        // When a proxy client (N1MM etc.) is actively polling the radio, it saturates
-        // the serial lock. Instead of competing (and losing), we read the cached values
-        // that SendRaw already parsed from proxy traffic. Zero serial queries needed.
-        bool proxyActive = _radio.ProxyIsActive;
-
         try
         {
-            long freq;
-            bool split;
-            string mode;
-            string vfo;
-            bool pttActive;
-            int smeter;
-            int power;
+            var freq = _radio.GetFreq();
+            if (freq <= 0) return;
 
-            if (proxyActive)
-            {
-                // ── Proxy-fed: use cached values (no serial I/O) ──
-                // N1MM polls FA/FB/FT/IF/AG0 etc. but NOT TX or SM0,
-                // so we still query those directly (2 quick commands).
-                freq = _radio.LastFrequency;
-                if (freq <= 0) return;
-                split = _radio.LastSplit;
-                mode = _radio.LastMode;
-                vfo = _radio.LastVFO;
-                pttActive = _radio.GetTXStatus();
-                smeter = !pttActive ? _radio.GetSMeter() : 0;
-                power = _radio.LastPower;
-            }
-            else
-            {
-                // ── Normal polling: query the radio directly ──
-                freq = _radio.GetFreq();
-                if (freq <= 0) return;
-                split = _radio.GetSplit();
-                mode = _radio.GetMode();
-                vfo = _radio.GetVFO();
-                pttActive = _radio.GetTXStatus();
-                smeter = !pttActive ? _radio.GetSMeter() : 0;
-                power = _radio.GetPower();
-            }
-
-            // ── Update frequency display ──
             var mhz = freq / 1_000_000;
             var khz = (freq % 1_000_000) / 1_000;
             var hz = freq % 1_000;
             FreqLabel.Text = $"{mhz:D2}.{khz:D3}.{hz:D3}";
 
-            if (split)
+            if (_radio.GetSplit())
             {
-                var freqB = proxyActive ? _radio.LastFreqB : _radio.GetFreqB();
+                var freqB = _radio.GetFreqB();
                 if (freqB > 0)
                 {
                     var mB = freqB / 1_000_000; var kB = (freqB % 1_000_000) / 1_000; var hB = freqB % 1_000;
@@ -437,11 +362,13 @@ public partial class MainWindow : Window
                 SplitIndicator.Text = "";
             }
 
+            var mode = _radio.GetMode();
             ModeLabel.Text = mode;
             if (mode != _lastMode) { _stats.RecordModeChange(mode); _lastMode = mode; }
 
-            VfoLabel.Text = $"VFO-{vfo}";
+            VfoLabel.Text = $"VFO-{_radio.GetVFO()}";
 
+            var pttActive = _radio.GetTXStatus();
             var tunerActive = _tgxl.IsActive || _amp.IsActive;
 
             if (!tunerActive)
@@ -494,10 +421,12 @@ public partial class MainWindow : Window
 
             if (!pttActive)
             {
+                var smeter = _radio.GetSMeter();
                 SMeterBar.Value = smeter;
                 SMeterLabel.Text = BandHelper.RawToSUnit(smeter);
             }
 
+            var power = _radio.GetPower();
             PowerLabel.Text = $"Power: {power}W";
 
             var band = BandHelper.GetBand(freq);
@@ -506,6 +435,9 @@ public partial class MainWindow : Window
                 _stats.RecordBandChange(band);
                 _lastBand = band;
             }
+
+            // Feed audio streamer with current radio state (no extra CAT calls)
+            _streamer?.UpdateStatus(freq, mode, band, power, pttActive, true);
 
             StatsLabel.Text = $"Session: {_stats.SessionDuration} | QSY: {_stats.QSYCount} | TX: {_stats.PTTCount} | TX Time: {_stats.TXTimeDisplay}";
 
@@ -529,12 +461,15 @@ public partial class MainWindow : Window
 
             if (_recorder.IsRecording)
             {
-                var recStatus = _recorder.GetStatus();
-                var elapsed = (double)recStatus["duration"];
+                var status = _recorder.GetStatus();
+                var elapsed = (double)status["duration"];
                 if (_autoRecordActive && _autoRecordTimer != default)
                 {
                     var remaining = (_autoRecordTimer - DateTime.UtcNow).TotalSeconds;
-                    RecordTime.Text = remaining > 0 ? $"{elapsed:F0}s (-{remaining:F0}s)" : $"{elapsed:F0}s";
+                    if (remaining > 0)
+                        RecordTime.Text = $"{elapsed:F0}s (-{remaining:F0}s)";
+                    else
+                        RecordTime.Text = $"{elapsed:F0}s";
                 }
                 else
                 {
@@ -614,10 +549,16 @@ public partial class MainWindow : Window
 
     // ========== BAND ==========
 
-    private void Band_Click(object sender, RoutedEventArgs e)
+    private async void Band_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.Tag is string band)
-            Api($"/api/band/{band}");
+        {
+            if (!BandHelper.BandFrequencies.TryGetValue(band, out var freq)) return;
+            var mode = BandHelper.GetModeForFrequency(freq);
+            _radio.SetFreq(freq);
+            await Task.Delay(100);
+            _radio.SetMode(mode);
+        }
     }
 
     // ========== MODE ==========
@@ -625,47 +566,55 @@ public partial class MainWindow : Window
     private void Mode_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.Tag is string mode)
-            Api($"/api/mode/{mode.ToLower()}");
+            _radio.SetMode(mode);
     }
 
     // ========== VFO ==========
 
-    private void VfoA_Click(object s, RoutedEventArgs e) => Api("/api/vfo/a");
-    private void VfoB_Click(object s, RoutedEventArgs e) => Api("/api/vfo/b");
-    private void VfoSwap_Click(object s, RoutedEventArgs e) => Api("/api/vfo/swap");
-    private void VfoCopyAB_Click(object s, RoutedEventArgs e) => Api("/api/vfo-copy/a2b");
-    private void SplitToggle_Click(object s, RoutedEventArgs e) => Api("/api/split/toggle");
+    private void VfoA_Click(object s, RoutedEventArgs e) => _radio.SetVFO("A");
+    private void VfoB_Click(object s, RoutedEventArgs e) => _radio.SetVFO("B");
+    private void VfoSwap_Click(object s, RoutedEventArgs e) => _radio.SwapVFO();
+    private void VfoCopyAB_Click(object s, RoutedEventArgs e) => _radio.CopyVFO("A", "B");
+    private void SplitToggle_Click(object s, RoutedEventArgs e)
+    { var c = _radio.GetSplit(); _radio.SetSplit(!c); }
 
     // ========== POWER ==========
 
     private void Power_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button btn && btn.Tag is string watts)
-            Api($"/api/power/set/{watts}");
+        if (sender is Button btn && btn.Tag is string watts && int.TryParse(watts, out var w))
+            _radio.SetPower(w);
     }
 
     // ========== TUNERS ==========
 
-    private void Tune_Click(object s, RoutedEventArgs e) => Api("/api/tune");
-    private void TgxlTune_Click(object s, RoutedEventArgs e) => Api("/api/tune/tgxl");
-    private void AmpTune_Click(object s, RoutedEventArgs e) => Api("/api/tune/amp");
+    private void Tune_Click(object s, RoutedEventArgs e) => _radio.StartTune();
+    private void TgxlTune_Click(object s, RoutedEventArgs e) => _tgxl.Tune();
+    private void AmpTune_Click(object s, RoutedEventArgs e) => _amp.Tune();
 
     // ========== FILTERS ==========
 
-    private void ToggleNB_Click(object s, RoutedEventArgs e) => Api("/api/toggle/nb");
-    private void ToggleNR_Click(object s, RoutedEventArgs e) => Api("/api/toggle/nr");
-    private void ToggleNotch_Click(object s, RoutedEventArgs e) => Api("/api/toggle/notch");
-    private void ToggleVOX_Click(object s, RoutedEventArgs e) => Api("/api/vox/toggle");
-    private void ToggleComp_Click(object s, RoutedEventArgs e) => Api("/api/comp/toggle");
-    private void CyclePreamp_Click(object s, RoutedEventArgs e) => Api("/api/preamp/cycle");
-    private void ToggleATT_Click(object s, RoutedEventArgs e) => Api("/api/att/toggle");
-    private void ToggleLock_Click(object s, RoutedEventArgs e) => Api("/api/toggle/lock");
-    private void ToggleAntenna_Click(object s, RoutedEventArgs e) => Api("/api/ant/toggle");
-    private void Ant1_Click(object s, RoutedEventArgs e) => Api("/api/ant/1");
-    private void Ant2_Click(object s, RoutedEventArgs e) => Api("/api/ant/2");
-    private void RxAnt_Click(object s, RoutedEventArgs e) => Api("/api/rxant/cycle");
-
-    private void CycleAGC_Click(object s, RoutedEventArgs e) => Api("/api/agc/cycle");
+    private void ToggleNB_Click(object s, RoutedEventArgs e) { var c = _radio.GetNB(); _radio.SetNB(!c); }
+    private void ToggleNR_Click(object s, RoutedEventArgs e) { var c = _radio.GetNR(); _radio.SetNR(!c); }
+    private void ToggleNotch_Click(object s, RoutedEventArgs e) { var c = _radio.GetNotch(); _radio.SetNotch(!c); }
+    private void ToggleVOX_Click(object s, RoutedEventArgs e) { var c = _radio.GetVOX(); _radio.SetVOX(!c); }
+    private void ToggleComp_Click(object s, RoutedEventArgs e) { var c = _radio.GetComp(); _radio.SetComp(!c); }
+    private void CyclePreamp_Click(object s, RoutedEventArgs e) => _radio.CyclePreamp();
+    private void ToggleATT_Click(object s, RoutedEventArgs e) { var c = _radio.GetATT(); _radio.SetATT(!c); }
+    private void ToggleLock_Click(object s, RoutedEventArgs e) { var c = _radio.GetLock(); _radio.SetLock(!c); }
+    private void ToggleAntenna_Click(object s, RoutedEventArgs e) => _radio.ToggleAntenna();
+    private void Ant1_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(1);
+    private void Ant2_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(2);
+    private void RxAnt_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(3);
+    private void CycleAGC_Click(object s, RoutedEventArgs e)
+    {
+        var current = _radio.GetAGC();
+        var next = current switch
+        {
+            "FAST" => "MID", "MID" => "SLOW", "SLOW" => "AUTO", "AUTO" => "OFF", _ => "FAST"
+        };
+        _radio.SetAGC(next);
+    }
 
     // ========== FLEXKNOB ==========
 
@@ -694,7 +643,11 @@ public partial class MainWindow : Window
         FlexModeBtn.Content = _flexknob.ModeName;
     }
 
-    private void FlexClearRIT_Click(object s, RoutedEventArgs e) => Api("/api/rit/clear");
+    private void FlexClearRIT_Click(object s, RoutedEventArgs e)
+    {
+        _radio.ClearRIT();
+        Logger.Info("FLEXKNOB", "RIT cleared from UI");
+    }
 
     private void FlexConnect_Click(object s, RoutedEventArgs e)
     {
@@ -759,7 +712,9 @@ public partial class MainWindow : Window
         var hz = FrequencyHelper.Parse(FreqEntry.Text);
         if (hz > 0)
         {
-            Api($"/api/freq/set/{hz}");
+            var mode = BandHelper.GetModeForFrequency(hz);
+            _radio.SetMode(mode);
+            _radio.SetFreq(hz);
             FreqEntry.Clear();
         }
     }
@@ -787,16 +742,11 @@ public partial class MainWindow : Window
         var dlg = new SettingsDialog(_config) { Owner = this };
         if (dlg.ShowDialog() == true)
         {
-            // WARNING FIX: Use CopyFrom() to update _config in-place instead of
-            // reassigning the field. All services (_recorder, _cluster, _flexknob,
-            // _wavelog, etc.) hold a direct reference to _config — reassigning here
-            // left them all pointing at the old object, so changes to AudioDevice,
-            // ClusterPollInterval, PTTRecordSeconds, etc. required an app restart.
-            _config.CopyFrom(dlg.Config);
+            _config = dlg.Config;
             _config.Save();
             Logger.Info("SETTINGS", "Configuration saved");
 
-            // Restart CAT proxy if its port setting changed
+            // Restart CAT proxy if its settings changed
             _catProxy?.Dispose();
             _catProxy = null;
             if (_config.CatProxyEnabled)
@@ -829,7 +779,10 @@ public partial class MainWindow : Window
         Activate();
     }
 
-    private void TrayExit_Click(object sender, RoutedEventArgs e) => ForceExit();
+    private void TrayExit_Click(object sender, RoutedEventArgs e)
+    {
+        ForceExit();
+    }
 
     private void ForceExit()
     {
@@ -862,6 +815,7 @@ public partial class MainWindow : Window
         _cluster.Disconnect();
         _catProxy?.Dispose();
         _kmtronic?.Dispose();
+        _streamer?.Dispose();
         _api.Dispose();
         _radio.Disconnect();
         TrayIcon.Dispose();

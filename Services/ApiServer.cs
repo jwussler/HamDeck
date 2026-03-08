@@ -28,6 +28,7 @@ public class ApiServer : IDisposable
     private readonly KmtronicService? _kmtronic;
     private readonly DxClusterClient? _cluster;
     private readonly SessionStats? _stats;
+    private readonly AudioStreamer? _streamer;
     private HttpListener? _listener;
     private HttpListener? _dashboardListener;
     private CancellationTokenSource? _cts;
@@ -63,7 +64,8 @@ public class ApiServer : IDisposable
 
     public ApiServer(RadioController radio, AudioRecorder recorder, Config config,
                      TgxlTuner tgxl, AmpTuner amp, KmtronicService? kmtronic = null,
-                     DxClusterClient? cluster = null, SessionStats? stats = null)
+                     DxClusterClient? cluster = null, SessionStats? stats = null,
+                     AudioStreamer? streamer = null)
     {
         _radio = radio;
         _recorder = recorder;
@@ -73,6 +75,7 @@ public class ApiServer : IDisposable
         _kmtronic = kmtronic;
         _cluster = cluster;
         _stats = stats;
+        _streamer = streamer;
 
         var exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".";
         _wwwroot = Path.Combine(exeDir, "wwwroot");
@@ -146,14 +149,14 @@ public class ApiServer : IDisposable
             try
             {
                 var ctx = await listener.GetContextAsync();
-                _ = Task.Run(() => HandleRequest(ctx, readOnly));
+                _ = Task.Run(() => HandleRequestAsync(ctx, readOnly, ct));
             }
             catch (ObjectDisposedException) { break; }
             catch (Exception ex) { Logger.Debug("API", "Listener error: {0}", ex.Message); }
         }
     }
 
-    private void HandleRequest(HttpListenerContext ctx, bool readOnly)
+    private async Task HandleRequestAsync(HttpListenerContext ctx, bool readOnly, CancellationToken ct)
     {
         var resp = ctx.Response;
         resp.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -163,6 +166,24 @@ public class ApiServer : IDisposable
         if (ctx.Request.HttpMethod == "OPTIONS") { resp.StatusCode = 200; resp.Close(); return; }
 
         var path = ctx.Request.Url?.AbsolutePath ?? "/";
+
+        // ===== AUDIO STREAM WebSocket (dashboard port only) =====
+        if (readOnly && path == "/ws" && ctx.Request.IsWebSocketRequest && _streamer != null)
+        {
+            await _streamer.HandleWebSocketClient(ctx, ct);
+            return;
+        }
+
+        // ===== AUDIO PLAYER PAGE (dashboard port only) =====
+        if (readOnly && path == "/audio" && _streamer != null)
+        {
+            resp.ContentType = "text/html; charset=utf-8";
+            var html = Encoding.UTF8.GetBytes(_streamer.GetPlayerHtml());
+            resp.ContentLength64 = html.Length;
+            resp.OutputStream.Write(html);
+            resp.Close();
+            return;
+        }
 
         if (path.StartsWith("/api/"))
         {

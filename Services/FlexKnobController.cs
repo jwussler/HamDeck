@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Ports;
 using System.Text;
@@ -48,12 +49,14 @@ public class FlexKnobController : IDisposable
     private int _pendingSteps;
     private long _lastApplyMs;
 
-    // WARNING FIX: Pre-allocate the apply timer once instead of creating and disposing
-    // a new Timer on every knob tick that arrives within ApplyIntervalMs.
-    // At fast VFO sweep speeds (100+ ticks/sec) the original Dispose/new pattern
-    // generated significant GC pressure. Use Change() to reschedule instead.
+    // IsActive guard — MainWindow.UpdateTick checks this to suppress serial polling
+    // during active knob rotation so commands don't fight for the serial port.
+    private long _lastActivityMs;
+    private const int ActiveWindowMs = 500;
+    public bool IsActive => Environment.TickCount64 - Interlocked.Read(ref _lastActivityMs) < ActiveWindowMs;
+
     private readonly Timer _applyTimer;
-    private const int ApplyIntervalMs = 15;
+    private const int ApplyIntervalMs = 50;
 
     public FlexKnobController(RadioController radio, Config config)
     {
@@ -348,6 +351,7 @@ public class FlexKnobController : IDisposable
     private void HandleRotation(int steps)
     {
         if (steps == 0) return;
+        Interlocked.Exchange(ref _lastActivityMs, Environment.TickCount64);
 
         switch (Mode)
         {
@@ -364,45 +368,65 @@ public class FlexKnobController : IDisposable
     private void HandleFrequencyRotation(int steps)
     {
         if (!_radio.Connected) return;
-
         Interlocked.Add(ref _pendingSteps, steps);
+        ScheduleApply();
+    }
 
+    private void ScheduleApply()
+    {
         var nowMs = Environment.TickCount64;
         if (nowMs - Interlocked.Read(ref _lastApplyMs) >= ApplyIntervalMs)
         {
-            // Enough time has passed — apply immediately
             ApplyPendingSteps();
         }
         else
         {
-            // WARNING FIX: Reschedule the pre-allocated timer with Change() rather than
-            // Dispose/new on every tick. Eliminates continuous GC pressure during fast
-            // VFO sweeps where ticks arrive faster than ApplyIntervalMs.
             _applyTimer.Change(ApplyIntervalMs, Timeout.Infinite);
         }
     }
 
     private void ApplyPendingSteps()
     {
-        var steps = Interlocked.Exchange(ref _pendingSteps, 0);
-        if (steps == 0) return;
-
         Interlocked.Exchange(ref _lastApplyMs, Environment.TickCount64);
-        var delta = (long)steps * StepHz;
-        _radio.StepFreq(delta);
-        Logger.Debug("FLEXKNOB", "Freq: {0:+#;-#}Hz ({1} steps x {2}Hz)", delta, steps, StepHz);
+
+        var steps = Interlocked.Exchange(ref _pendingSteps, 0);
+        if (steps != 0)
+        {
+            var delta = (long)steps * StepHz;
+            _radio.StepFreq(delta);
+            Logger.Debug("FLEXKNOB", "Freq: {0:+#;-#}Hz ({1} steps x {2}Hz)", delta, steps, StepHz);
+        }
+
+        if (_volumeDirty)
+        {
+            _volumeDirty = false;
+            _radio.SetAFGain(_pendingVolume);
+            Logger.Debug("FLEXKNOB", "Vol: {0}", _pendingVolume);
+        }
+
+        if (_ritDirty)
+        {
+            _ritDirty = false;
+            _radio.SetRITOffset(_cachedRITOffset);
+            Logger.Debug("FLEXKNOB", "RIT: {0}", _cachedRITOffset);
+        }
     }
 
     private int _cachedVolume = -1;
+    private int _pendingVolume;
+    private bool _volumeDirty;
     private int _cachedRITOffset;
     private bool _cachedRITOn;
+    private bool _ritDirty;
 
     private void HandleVolumeRotation(int steps)
     {
         if (!_radio.Connected) return;
         if (_cachedVolume < 0) _cachedVolume = _radio.GetAFGain();
         _cachedVolume = Math.Clamp(_cachedVolume + steps * 13, 0, 255);
-        _radio.SetAFGain(_cachedVolume);
+        _pendingVolume = _cachedVolume;
+        _volumeDirty = true;
+        ScheduleApply();
     }
 
     private void HandleRITRotation(int steps)
@@ -410,7 +434,8 @@ public class FlexKnobController : IDisposable
         if (!_radio.Connected) return;
         if (!_cachedRITOn) { _radio.SetRIT(true); _cachedRITOn = true; }
         _cachedRITOffset += steps * 10;
-        _radio.SetRITOffset(_cachedRITOffset);
+        _ritDirty = true;
+        ScheduleApply();
     }
 
     // ========== BUTTONS ==========
@@ -464,8 +489,10 @@ public class FlexKnobController : IDisposable
     private void ResetCaches()
     {
         _cachedVolume = -1;
+        _volumeDirty = false;
         _cachedRITOffset = 0;
         _cachedRITOn = false;
+        _ritDirty = false;
     }
 
     public void CycleStep()
