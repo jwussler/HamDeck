@@ -210,6 +210,24 @@ public class AudioStreamer : IDisposable
                 bits_per_sample = 16
             });
             _sendQueue.Enqueue(new QueueItem(Encoding.UTF8.GetBytes(config), WebSocketMessageType.Text));
+
+            // Send immediate radio status so the player shows frequency right away
+            if (_cachedConnected && _cachedFreq > 0)
+            {
+                var status = JsonSerializer.Serialize(new
+                {
+                    type = "radio_status",
+                    frequency = _cachedFreq,
+                    mode = _cachedMode,
+                    band = _cachedBand,
+                    power = _cachedPower,
+                    tx = _cachedTx,
+                    clients = _clients.Count,
+                    streaming = IsStreaming,
+                    sample_rate = _config.RecordSampleRate
+                });
+                _sendQueue.Enqueue(new QueueItem(Encoding.UTF8.GetBytes(status), WebSocketMessageType.Text));
+            }
             _dataReady.Release();
 
             // Keep connection alive
