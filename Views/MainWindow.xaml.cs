@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly SessionStats _stats = new();
     private readonly DispatcherTimer _updateTimer;
     private TcpCatProxy? _catProxy;
+    private AudioStreamer? _streamer;
 
     private bool _running = true;
     private bool _forceExit;
@@ -59,7 +60,7 @@ public partial class MainWindow : Window
 
         var logLevel = _config.LogLevel == "debug" ? Services.LogLevel.Debug : Services.LogLevel.Info;
         Logger.Init(logLevel, _config.LogToFile);
-        Logger.Info("MAIN", "HamDeck v2.0 (C#) starting");
+        Logger.Info("MAIN", "HamDeck v2.1 (C#) starting");
 
         foreach (var err in _config.Validate())
             Logger.Warn("CONFIG", err);
@@ -104,7 +105,12 @@ public partial class MainWindow : Window
             FlexConnBtn.Content = _flexknob.IsConnected ? "Disconnect" : "Connect";
         });
 
-        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic);
+        // Audio streamer (captures audio, WebSocket served via dashboard port)
+        _streamer = new AudioStreamer(_config);
+        _streamer.Start();
+        _recorder.Streamer = _streamer;
+
+        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, streamer: _streamer);
         if (_config.APIEnabled) _api.Start();
 
         // TCP CAT Proxy for N1MM and external loggers
@@ -251,6 +257,10 @@ public partial class MainWindow : Window
         // poll cycle so the proxy command isn't queued behind 7 serial round-trips
         if (Environment.TickCount64 - _radio.LastProxyActivityMs < 300) return;
 
+        // Yield to FlexKnob — during active rotation, skip the poll cycle
+        // so knob commands don't fight with 7 serial round-trips
+        if (_flexknob.IsActive) return;
+
         // ===== DISCONNECTED STATE =====
         if (!_radio.Connected)
         {
@@ -278,6 +288,7 @@ public partial class MainWindow : Window
                 }
                 _lastPTTState = false;
                 _nextReconnectAttempt = DateTime.UtcNow.Add(ReconnectInterval);
+                _streamer?.UpdateStatus(0, "", "", 0, false, false);
             }
 
             if (!_reconnecting && !string.IsNullOrEmpty(_config.RadioPort)
@@ -424,6 +435,9 @@ public partial class MainWindow : Window
                 _stats.RecordBandChange(band);
                 _lastBand = band;
             }
+
+            // Feed audio streamer with current radio state (no extra CAT calls)
+            _streamer?.UpdateStatus(freq, mode, band, power, pttActive, true);
 
             StatsLabel.Text = $"Session: {_stats.SessionDuration} | QSY: {_stats.QSYCount} | TX: {_stats.PTTCount} | TX Time: {_stats.TXTimeDisplay}";
 
@@ -801,6 +815,7 @@ public partial class MainWindow : Window
         _cluster.Disconnect();
         _catProxy?.Dispose();
         _kmtronic?.Dispose();
+        _streamer?.Dispose();
         _api.Dispose();
         _radio.Disconnect();
         TrayIcon.Dispose();

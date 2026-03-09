@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.1 — 2026-03-08
+
+Audio streaming, dashboard integration, and performance improvements.
+
+### Added
+- WebSocket audio streaming: live radio audio to any browser via PCM-over-WebSocket
+- Built-in audio player page at `/audio` on the dashboard port (5002)
+- Audio player card embedded in the main web dashboard
+- Web Audio API playback with level meter, volume control, and listener count
+- AudioRecorder shares single capture with AudioStreamer (zero device contention)
+- FlexKnob flood protection: batched volume/RIT commands, 50ms throttle interval
+- FlexKnob `IsActive` guard suppresses UI serial polling during knob rotation
+- Inno Setup installer auto-registers HTTP URL ACLs and Windows Firewall rules
+- Installer cleanup on uninstall (removes URL ACLs and firewall rules)
+
+### Fixed
+- WebSocket race condition: unified send loop prevents concurrent SendAsync errors
+- Thread pool starvation: audio sends use LongRunning tasks, never block thread pool
+- Bounded send queue drops oldest audio chunks for slow clients instead of freezing app
+- FlexKnob volume/RIT no longer send individual serial commands per tick
+
+### Changed
+- Audio stream sample rate uses `RecordSampleRate` from config (shared with recorder)
+- Dashboard port (5002) now handles WebSocket upgrades for audio streaming
+- `PrivilegesRequired` changed to `admin` in Inno Setup for netsh commands
+
 ## v2.0 — 2026-03-08
 
 Complete rewrite from Go/Fyne to C#/WPF. Production-ready daily-driver release.

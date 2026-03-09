@@ -4,3 +4,5 @@ obj/
 installer/ 
 App.xaml.zip 
 *.bak 
+
+bin.zip

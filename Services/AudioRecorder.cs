@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using NAudio.Wave;
@@ -8,7 +9,7 @@ namespace HamDeck.Services;
 
 /// <summary>
 /// Audio recorder with ring buffer for lookback capture and continuous recording.
-/// Uses NAudio for Windows audio capture.
+/// Uses NAudio for Windows audio capture. Also feeds AudioStreamer if attached.
 /// </summary>
 public class AudioRecorder : IDisposable
 {
@@ -25,6 +26,12 @@ public class AudioRecorder : IDisposable
 
     public bool IsRecording { get; private set; }
     public bool IsBuffering { get; private set; }
+
+    /// <summary>
+    /// Set this to feed audio data to the WebSocket streamer.
+    /// AudioStreamer.FeedAudio() is called from OnDataAvailable.
+    /// </summary>
+    public AudioStreamer? Streamer { get; set; }
 
     public AudioRecorder(RadioController radio, Config config)
     {
@@ -99,6 +106,9 @@ public class AudioRecorder : IDisposable
             // Write to active recording file
             _writer?.Write(e.Buffer, 0, e.BytesRecorded);
         }
+
+        // Feed audio to WebSocket streamer (outside lock — FeedAudio just enqueues)
+        Streamer?.FeedAudio(e.Buffer, e.BytesRecorded);
     }
 
     /// <summary>Start recording to a file</summary>

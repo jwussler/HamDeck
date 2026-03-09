@@ -1,6 +1,6 @@
 @echo off
 echo ============================================
-echo   HamDeck v2.0 - Build and Install
+echo   HamDeck v2.1 - Build and Install
 echo ============================================
 echo.
 
@@ -22,7 +22,7 @@ set "WORKDIR=%CD%\bin\Release\net8.0-windows"
 set "SHORTCUT=%USERPROFILE%\Desktop\HamDeck.lnk"
 if exist "%USERPROFILE%\OneDrive\Desktop" set "SHORTCUT=%USERPROFILE%\OneDrive\Desktop\HamDeck.lnk"
 
-powershell -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut('%SHORTCUT%'); $sc.TargetPath = '%EXEPATH%'; $sc.WorkingDirectory = '%WORKDIR%'; $sc.Description = 'HamDeck v2.0'; $sc.Save()"
+powershell -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut('%SHORTCUT%'); $sc.TargetPath = '%EXEPATH%'; $sc.WorkingDirectory = '%WORKDIR%'; $sc.Description = 'HamDeck v2.1'; $sc.Save()"
 
 echo.
 echo ============================================

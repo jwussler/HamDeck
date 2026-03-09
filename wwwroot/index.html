@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HamDeck — WA0O</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* ===== Audio Player Card ===== */
+        .audio-player { display: flex; align-items: center; gap: 1rem; width: 100%; }
+        .audio-play-btn {
+            width: 48px; height: 48px; border-radius: 50%; border: 2px solid var(--accent, #00d4ff);
+            background: transparent; color: var(--accent, #00d4ff); cursor: pointer;
+            display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .audio-play-btn:hover { background: rgba(0, 212, 255, 0.15); transform: scale(1.05); }
+        .audio-play-btn:active { transform: scale(0.95); }
+        .audio-play-btn.playing { border-color: #22c55e; color: #22c55e; box-shadow: 0 0 12px rgba(34, 197, 94, 0.2); }
+        .audio-play-btn svg { width: 20px; height: 20px; fill: currentColor; }
+        .audio-controls { flex: 1; display: flex; flex-direction: column; gap: 0.4rem; }
+        .audio-meter-track {
+            width: 100%; height: 4px; background: var(--surface, #1e2d4a);
+            border-radius: 2px; overflow: hidden;
+        }
+        .audio-meter-fill {
+            height: 100%; width: 0%; border-radius: 2px;
+            background: linear-gradient(90deg, #22c55e, #00d4ff, #ff6b35);
+            transition: width 0.1s;
+        }
+        .audio-vol-row { display: flex; align-items: center; gap: 0.5rem; }
+        .audio-vol-row label { font-size: 0.65rem; color: var(--text-dim, #64748b); letter-spacing: 0.08em; }
+        .audio-vol-row input[type="range"] {
+            -webkit-appearance: none; appearance: none; flex: 1; height: 3px;
+            background: var(--surface, #1e2d4a); border-radius: 2px; outline: none;
+        }
+        .audio-vol-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+            background: var(--accent, #00d4ff); cursor: pointer;
+        }
+        .audio-status {
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 0.65rem; color: var(--text-dim, #64748b); margin-top: 0.2rem;
+        }
+        .audio-status-dot {
+            display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+            margin-right: 0.3rem; background: #ef4444; transition: background 0.3s;
+        }
+        .audio-status-dot.connected { background: #22c55e; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <h1>HamDeck</h1>
+            <span class="callsign">WA0O</span>
+        </div>
+        <div class="header-right">
+            <span id="connection-badge" class="badge badge-offline">OFFLINE</span>
+            <span id="clock" class="clock"></span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Row 1: Frequency + Radio Status -->
+        <section class="card card-freq">
+            <div class="card-label">FREQUENCY</div>
+            <div id="freq-display" class="freq-display">—</div>
+            <div class="freq-meta">
+                <span id="band-badge" class="badge badge-band">—</span>
+                <span id="mode-badge" class="badge badge-mode">—</span>
+                <span id="vfo-badge" class="badge badge-vfo">VFO A</span>
+                <span id="split-badge" class="badge badge-split badge-hidden">SPLIT</span>
+                <span id="tx-badge" class="badge badge-tx badge-hidden">TX</span>
+            </div>
+        </section>
+
+        <section class="card card-radio">
+            <div class="card-label">RADIO</div>
+            <div class="radio-grid">
+                <div class="radio-item">
+                    <span class="radio-key">Power</span>
+                    <span id="power-val" class="radio-val">—</span>
+                </div>
+                <div class="radio-item">
+                    <span class="radio-key">Antenna</span>
+                    <span id="ant-val" class="radio-val">—</span>
+                </div>
+                <div class="radio-item">
+                    <span class="radio-key">RX Ant</span>
+                    <span id="rxant-val" class="radio-val">—</span>
+                </div>
+                <div class="radio-item">
+                    <span class="radio-key">ATU</span>
+                    <span id="atu-val" class="radio-val">—</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Audio Stream Player -->
+        <section class="card card-session">
+            <div class="card-label">AUDIO STREAM</div>
+            <div class="audio-player">
+                <button class="audio-play-btn" id="audioPlayBtn" onclick="window._audioToggle()">
+                    <svg id="audioPlayIcon" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg>
+                    <svg id="audioStopIcon" viewBox="0 0 24 24" style="display:none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+                </button>
+                <div class="audio-controls">
+                    <div class="audio-meter-track"><div class="audio-meter-fill" id="audioMeter"></div></div>
+                    <div class="audio-vol-row">
+                        <label>VOL</label>
+                        <input type="range" id="audioVolume" min="0" max="100" value="75" oninput="window._audioSetVol(this.value)">
+                        <label id="audioVolLabel">75%</label>
+                    </div>
+                    <div class="audio-status">
+                        <div><span class="audio-status-dot" id="audioStatusDot"></span><span id="audioStatusText">Click play to listen</span></div>
+                        <div id="audioListeners"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Row 2: Meters -->
+        <section class="card card-meters">
+            <div class="card-label">METERS</div>
+            <div class="meters-grid">
+                <div class="meter">
+                    <div class="meter-label">S-METER</div>
+                    <div class="meter-bar-track">
+                        <div id="smeter-bar" class="meter-bar meter-bar-signal" style="width: 0%"></div>
+                    </div>
+                    <div id="smeter-val" class="meter-value">S0</div>
+                </div>
+                <div class="meter">
+                    <div class="meter-label">POWER</div>
+                    <div class="meter-bar-track">
+                        <div id="power-bar" class="meter-bar meter-bar-power" style="width: 0%"></div>
+                    </div>
+                    <div id="power-meter-val" class="meter-value">0W</div>
+                </div>
+                <div class="meter">
+                    <div class="meter-label">SWR</div>
+                    <div class="meter-bar-track">
+                        <div id="swr-bar" class="meter-bar meter-bar-swr" style="width: 0%"></div>
+                    </div>
+                    <div id="swr-val" class="meter-value">1.0</div>
+                </div>
+                <div class="meter">
+                    <div class="meter-label">ALC</div>
+                    <div class="meter-bar-track">
+                        <div id="alc-bar" class="meter-bar meter-bar-alc" style="width: 0%"></div>
+                    </div>
+                    <div id="alc-val" class="meter-value">0</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Row 3: Session + Audio -->
+        <section class="card card-session">
+            <div class="card-label">SESSION</div>
+            <div class="session-grid">
+                <div class="session-item">
+                    <span class="session-key">Recording</span>
+                    <span id="rec-status" class="rec-indicator rec-off">OFF</span>
+                </div>
+                <div class="session-item">
+                    <span class="session-key">TX Count</span>
+                    <span id="tx-count" class="session-val">—</span>
+                </div>
+                <div class="session-item">
+                    <span class="session-key">TX Time</span>
+                    <span id="tx-time" class="session-val">—</span>
+                </div>
+                <div class="session-item">
+                    <span class="session-key">QSY Count</span>
+                    <span id="qsy-count" class="session-val">—</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <span>HamDeck v2.1 — 73 de WA0O</span>
+    </footer>
+
+    <script src="app.js"></script>
+    <script>
+    // ===== AUDIO STREAM (WebSocket PCM player) =====
+    (function() {
+        'use strict';
+        let ws = null, audioCtx = null, gainNode = null, playing = false, sampleRate = 22050;
+        let reconnectTimer = null, nextPlayTime = 0;
+
+        const btn = document.getElementById('audioPlayBtn');
+        const playIcon = document.getElementById('audioPlayIcon');
+        const stopIcon = document.getElementById('audioStopIcon');
+        const meter = document.getElementById('audioMeter');
+        const dot = document.getElementById('audioStatusDot');
+        const statusText = document.getElementById('audioStatusText');
+        const listeners = document.getElementById('audioListeners');
+        const volLabel = document.getElementById('audioVolLabel');
+
+        function connect() {
+            if (ws && ws.readyState <= 1) return;
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(proto + '//' + location.host + '/ws');
+            ws.binaryType = 'arraybuffer';
+            ws.onopen = () => { dot.classList.add('connected'); statusText.textContent = 'Connected';
+                if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } };
+            ws.onclose = () => { dot.classList.remove('connected'); statusText.textContent = 'Disconnected'; scheduleReconnect(); };
+            ws.onerror = () => { dot.classList.remove('connected'); statusText.textContent = 'Connection error'; };
+            ws.onmessage = (evt) => {
+                if (typeof evt.data === 'string') {
+                    const msg = JSON.parse(evt.data);
+                    if (msg.type === 'config') sampleRate = msg.sample_rate || 22050;
+                    if (msg.type === 'radio_status' && msg.clients !== undefined)
+                        listeners.textContent = msg.clients + ' listener' + (msg.clients !== 1 ? 's' : '');
+                } else if (playing) handleAudio(evt.data);
+            };
+        }
+
+        function scheduleReconnect() {
+            if (reconnectTimer) return;
+            reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 3000);
+        }
+
+        function handleAudio(ab) {
+            if (!audioCtx || audioCtx.state === 'closed') return;
+            const int16 = new Int16Array(ab);
+            const f32 = new Float32Array(int16.length);
+            for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768.0;
+
+            let sum = 0;
+            for (let i = 0; i < f32.length; i++) sum += f32[i] * f32[i];
+            const rms = Math.sqrt(sum / f32.length);
+            const db = 20 * Math.log10(Math.max(rms, 1e-6));
+            meter.style.width = Math.min(100, Math.max(0, (db + 50) * 2)) + '%';
+
+            const buf = audioCtx.createBuffer(1, f32.length, sampleRate);
+            buf.getChannelData(0).set(f32);
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf; src.connect(gainNode);
+            const now = audioCtx.currentTime;
+            if (nextPlayTime < now) nextPlayTime = now + 0.05;
+            src.start(nextPlayTime); nextPlayTime += buf.duration;
+        }
+
+        window._audioToggle = function() { playing ? stopAudio() : startAudio(); };
+
+        function startAudio() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+            gainNode = audioCtx.createGain();
+            gainNode.gain.value = document.getElementById('audioVolume').value / 100;
+            gainNode.connect(audioCtx.destination);
+            playing = true; nextPlayTime = 0;
+            btn.classList.add('playing'); playIcon.style.display = 'none';
+            stopIcon.style.display = 'block';
+            statusText.textContent = 'Connecting...';
+            if (!ws || ws.readyState > 1) connect();
+        }
+
+        function stopAudio() {
+            playing = false;
+            if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+            gainNode = null; btn.classList.remove('playing');
+            playIcon.style.display = 'block'; stopIcon.style.display = 'none';
+            meter.style.width = '0%';
+        }
+
+        window._audioSetVol = function(v) {
+            volLabel.textContent = v + '%';
+            if (gainNode) gainNode.gain.value = v / 100;
+        };
+    })();
+    </script>
+</body>
+</html>

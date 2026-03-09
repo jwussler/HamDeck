@@ -21,10 +21,10 @@ public partial class App : Application
                 System.Net.IPAddress.Loopback, 5099);
             listener.Start();
 
-            // Store listener so it stays alive
+            // Store listener so it stays alive for the process lifetime
             Current.Properties["InstanceListener"] = listener;
 
-            // Listen for other instances
+            // Listen for re-show signals from subsequent launch attempts
             Task.Run(async () =>
             {
                 while (true)
@@ -48,13 +48,19 @@ public partial class App : Application
                             });
                         }
                     }
-                    catch { break; }
+                    catch (ObjectDisposedException) { break; }  // Listener stopped — exit cleanly
+                    catch (OperationCanceledException) { break; }
+                    // BUG FIX: Any other exception (transient network error, client disconnect,
+                    // etc.) should NOT break the loop. Use continue so subsequent launches can
+                    // still signal this instance. The original break caused permanent deafness
+                    // after the first error.
+                    catch { continue; }
                 }
             });
         }
         catch
         {
-            // Another instance is running - signal it and exit
+            // Another instance is running — signal it to show and exit
             try
             {
                 using var client = new System.Net.Sockets.TcpClient();

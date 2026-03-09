@@ -1,6 +1,6 @@
 @echo off
 echo ============================================
-echo   HamDeck v2.0 - Build Distribution Package
+echo   HamDeck v2.1 - Build Distribution Package
 echo ============================================
 echo.
 
@@ -20,15 +20,15 @@ if not exist "%PUBDIR%\HamDeck.exe" (
 
 echo [3/3] Creating distribution zip...
 :: Remove old zip if exists
-if exist "HamDeck-v2.0-dist.zip" del "HamDeck-v2.0-dist.zip"
+if exist "HamDeck-v2.1-dist.zip" del "HamDeck-v2.1-dist.zip"
 
 :: Use PowerShell to create zip
-powershell -Command "Compress-Archive -Path '%PUBDIR%\*' -DestinationPath 'HamDeck-v2.0-dist.zip' -Force"
+powershell -Command "Compress-Archive -Path '%PUBDIR%\*' -DestinationPath 'HamDeck-v2.1-dist.zip' -Force"
 
 echo.
 echo ============================================
 echo   Distribution package created:
-echo   %CD%\HamDeck-v2.0-dist.zip
+echo   %CD%\HamDeck-v2.1-dist.zip
 echo.
 echo   Instructions for friends:
 echo   1. Right-click the .zip, Properties, check Unblock, OK

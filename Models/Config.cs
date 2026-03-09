@@ -42,6 +42,11 @@ public class Config
     [JsonPropertyName("cat_proxy_enabled")] public bool CatProxyEnabled { get; set; } = false;
     [JsonPropertyName("cat_proxy_port")] public int CatProxyPort { get; set; } = 4532;
 
+    // Audio Stream settings
+    [JsonPropertyName("audio_stream_enabled")] public bool AudioStreamEnabled { get; set; } = false;
+    [JsonPropertyName("audio_stream_port")] public int AudioStreamPort { get; set; } = 5003;
+    [JsonPropertyName("audio_stream_sample_rate")] public int AudioStreamSampleRate { get; set; } = 22050;
+
     // TG-XL Tuner settings
     [JsonPropertyName("tgxl_host")] public string TGXLHost { get; set; } = "192.168.40.51";
     [JsonPropertyName("tgxl_port")] public int TGXLPort { get; set; } = 9010;
@@ -137,6 +142,8 @@ public class Config
         if (PTTQSYThresholdKHz == 0) PTTQSYThresholdKHz = 10;
         if (APIPort == 0) APIPort = 5001;
         if (CatProxyPort == 0) CatProxyPort = 4532;
+        if (AudioStreamPort == 0) AudioStreamPort = 5003;
+        if (AudioStreamSampleRate == 0) AudioStreamSampleRate = 22050;
         if (TGXLPort == 0) TGXLPort = 9010;
         if (KmtronicPort == 0) KmtronicPort = 12345;
         if (WavelogStationID == 0) WavelogStationID = 1;
@@ -155,6 +162,7 @@ public class Config
         if (!validBauds.Contains(RadioBaud)) errors.Add("Invalid baud rate");
         if (APIPort < 1 || APIPort > 65535) errors.Add("API port must be 1-65535");
         if (CatProxyPort < 1 || CatProxyPort > 65535) errors.Add("CAT proxy port must be 1-65535");
+        if (AudioStreamPort < 1 || AudioStreamPort > 65535) errors.Add("Audio stream port must be 1-65535");
         int[] validSR = [8000, 11025, 22050, 44100, 48000];
         if (!validSR.Contains(RecordSampleRate)) errors.Add("Invalid sample rate");
         if (WavelogEnabled && string.IsNullOrEmpty(WavelogURL)) errors.Add("Wavelog URL required when enabled");
