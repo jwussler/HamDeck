@@ -189,7 +189,7 @@ public class RadioController : IDisposable
         bool isQuery =
             upper == "FA;" || upper == "FB;" || upper == "IF;" ||
             upper == "MD0;" || upper == "TX;" || upper == "PC;" ||
-            upper == "ST;" || upper == "FT;" || upper == "VS;" || upper == "AG0;" ||
+            upper == "ST;" || upper == "FT;" || upper == "VS;" || upper == "AG0;" || upper == "AG1;" ||
             upper == "RG0;" || upper == "SM0;" || upper == "SM1;" ||
             upper == "RM0;" || upper == "RM1;" || upper == "RM2;" || upper == "RM3;" ||
             upper == "RM4;" || upper == "RM5;" || upper == "RM6;" || upper == "RM7;" ||
@@ -485,6 +485,17 @@ public class RadioController : IDisposable
     }
 
     public void SetAFGain(int level) => Send($"AG0{Math.Clamp(level, 0, 255):D3};", false);
+
+    // ========== SUB-BAND AF GAIN ==========
+
+    public int GetSubAFGain()
+    {
+        var resp = Send("AG1;");
+        if (resp.StartsWith("AG1") && resp.Length >= 6 && int.TryParse(resp[3..6], out var v)) return v;
+        return 0;
+    }
+
+    public void SetSubAFGain(int level) => Send($"AG1{Math.Clamp(level, 0, 255):D3};", false);
 
     public int GetRFGain()
     {

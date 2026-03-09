@@ -243,6 +243,9 @@
                             <Button Content="AGC" Style="{StaticResource HamButton}" Click="CycleAGC_Click" Margin="2"/>
                             <Button Content="ANT" Style="{StaticResource HamButton}" Click="ToggleAntenna_Click" Margin="2"/>
                             <Button x:Name="RxAntBtn" Content="RX ANT" Style="{StaticResource HamButton}" Click="RxAnt_Click" Margin="2"/>
+                            <Button Content="Mute" Style="{StaticResource HamButton}" Click="MuteToggle_Click" Margin="2" ToolTip="Mute main band (AG0)"/>
+                            <Button Content="Mute Sub" Style="{StaticResource HamButton}" Click="MuteSubToggle_Click" Margin="2" ToolTip="Mute sub band (AG1)"/>
+                            <Button Content="Mute All" Style="{StaticResource HamButton}" Click="MuteAllToggle_Click" Margin="2" ToolTip="Mute main + sub"/>
                         </WrapPanel>
                     </StackPanel>
                 </Border>

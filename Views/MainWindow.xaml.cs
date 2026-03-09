@@ -606,6 +606,37 @@ public partial class MainWindow : Window
     private void Ant1_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(1);
     private void Ant2_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(2);
     private void RxAnt_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(3);
+
+    // ========== MUTE ==========
+
+    private void MuteToggle_Click(object s, RoutedEventArgs e)
+    {
+        if (_radio.GetAFGain() > 0) _radio.SetAFGain(0);
+        else _radio.SetAFGain(128);
+    }
+
+    private void MuteSubToggle_Click(object s, RoutedEventArgs e)
+    {
+        if (_radio.GetSubAFGain() > 0) _radio.SetSubAFGain(0);
+        else _radio.SetSubAFGain(128);
+    }
+
+    private void MuteAllToggle_Click(object s, RoutedEventArgs e)
+    {
+        bool mainMuted = _radio.GetAFGain() == 0;
+        bool subMuted = _radio.GetSubAFGain() == 0;
+        if (mainMuted && subMuted)
+        {
+            _radio.SetAFGain(128);
+            _radio.SetSubAFGain(128);
+        }
+        else
+        {
+            _radio.SetAFGain(0);
+            _radio.SetSubAFGain(0);
+        }
+    }
+
     private void CycleAGC_Click(object s, RoutedEventArgs e)
     {
         var current = _radio.GetAGC();

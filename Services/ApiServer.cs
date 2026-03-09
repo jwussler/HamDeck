@@ -355,6 +355,21 @@ public class ApiServer : IDisposable
         if (path == "/api/mute/off") { _radio.SetAFGain(128); return OK("mute", 0); }
         if (path == "/api/mute/toggle") { if (_radio.GetAFGain() > 0) { _radio.SetAFGain(0); return OK("mute", 1); } _radio.SetAFGain(128); return OK("mute", 0); }
 
+        // Sub-band mute (AG1)
+        if (path == "/api/mute-sub/on") { _radio.SetSubAFGain(0); return OK("mute_sub", 1); }
+        if (path == "/api/mute-sub/off") { _radio.SetSubAFGain(128); return OK("mute_sub", 0); }
+        if (path == "/api/mute-sub/toggle") { if (_radio.GetSubAFGain() > 0) { _radio.SetSubAFGain(0); return OK("mute_sub", 1); } _radio.SetSubAFGain(128); return OK("mute_sub", 0); }
+
+        // Mute all (main + sub)
+        if (path == "/api/mute-all/on") { _radio.SetAFGain(0); _radio.SetSubAFGain(0); return OK("mute_all", 1); }
+        if (path == "/api/mute-all/off") { _radio.SetAFGain(128); _radio.SetSubAFGain(128); return OK("mute_all", 0); }
+        if (path == "/api/mute-all/toggle") {
+            bool mainMuted = _radio.GetAFGain() == 0;
+            bool subMuted = _radio.GetSubAFGain() == 0;
+            if (mainMuted && subMuted) { _radio.SetAFGain(128); _radio.SetSubAFGain(128); return OK("mute_all", 0); }
+            _radio.SetAFGain(0); _radio.SetSubAFGain(0); return OK("mute_all", 1);
+        }
+
         if (path == "/api/toggle/nb") { var c = _radio.GetNB(); _radio.SetNB(!c); return OK("nb", !c); }
         if (path == "/api/toggle/dnr" || path == "/api/toggle/nr") { var c = _radio.GetNR(); _radio.SetNR(!c); return OK("nr", !c); }
         if (path == "/api/toggle/notch") { var c = _radio.GetNotch(); _radio.SetNotch(!c); return OK("notch", !c); }
