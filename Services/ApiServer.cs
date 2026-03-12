@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.WebSockets;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using HamDeck.Helpers;
@@ -29,6 +31,9 @@ public class ApiServer : IDisposable
     private readonly DxClusterClient? _cluster;
     private readonly SessionStats? _stats;
     private readonly AudioStreamer? _streamer;
+    private readonly AudioTransmitter? _txAudio;
+    private readonly FlexKnobController? _flexknob;
+    private AuthService? _auth;
     private HttpListener? _listener;
     private HttpListener? _dashboardListener;
     private CancellationTokenSource? _cts;
@@ -49,6 +54,7 @@ public class ApiServer : IDisposable
     private static readonly HashSet<string> ReadOnlyRoutes = new()
     {
         "/api/status",
+        "/api/status/full",
         "/api/health",
         "/api/meters",
         "/api/session",
@@ -60,12 +66,14 @@ public class ApiServer : IDisposable
         "/api/cw-speed/get",
         "/api/ant/get",
         "/api/ant/rx/get",
+        "/api/auth/status",
     };
 
     public ApiServer(RadioController radio, AudioRecorder recorder, Config config,
                      TgxlTuner tgxl, AmpTuner amp, KmtronicService? kmtronic = null,
                      DxClusterClient? cluster = null, SessionStats? stats = null,
-                     AudioStreamer? streamer = null)
+                     AudioStreamer? streamer = null, AuthService? auth = null,
+                     AudioTransmitter? txAudio = null, FlexKnobController? flexknob = null)
     {
         _radio = radio;
         _recorder = recorder;
@@ -76,6 +84,9 @@ public class ApiServer : IDisposable
         _cluster = cluster;
         _stats = stats;
         _streamer = streamer;
+        _auth = auth;
+        _txAudio = txAudio;
+        _flexknob = flexknob;
 
         var exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".";
         _wwwroot = Path.Combine(exeDir, "wwwroot");
@@ -167,14 +178,52 @@ public class ApiServer : IDisposable
 
         var path = ctx.Request.Url?.AbsolutePath ?? "/";
 
-        // ===== AUDIO STREAM WebSocket (dashboard port only) =====
+        // ===== AUDIO STREAM WebSocket (dashboard port only, no auth required) =====
         if (readOnly && path == "/ws" && ctx.Request.IsWebSocketRequest && _streamer != null)
         {
             await _streamer.HandleWebSocketClient(ctx, ct);
             return;
         }
 
-        // ===== AUDIO PLAYER PAGE (dashboard port only) =====
+        // ===== TX AUDIO WebSocket (dashboard port, authenticated + can_transmit) =====
+        if (readOnly && path == "/ws/tx" && ctx.Request.IsWebSocketRequest)
+        {
+            if (_txAudio == null)
+            {
+                Logger.Warn("API", "TX audio WebSocket requested but service not available");
+                resp.StatusCode = 503;
+                resp.Close();
+                return;
+            }
+
+            var token = GetSessionToken(ctx);
+            if (_auth != null && (!_auth.ValidateSession(token) || !_auth.CanTransmit(token)))
+            {
+                Logger.Warn("API", "TX audio WebSocket rejected — not authenticated or TX not permitted");
+                try
+                {
+                    var wsCtx = await ctx.AcceptWebSocketAsync(null);
+                    await wsCtx.WebSocket.CloseAsync(
+                        WebSocketCloseStatus.PolicyViolation,
+                        "Authentication required or transmit not permitted", CancellationToken.None);
+                }
+                catch { resp.StatusCode = 401; resp.Close(); }
+                return;
+            }
+
+            Logger.Info("API", "TX audio WebSocket accepted");
+            await _txAudio.HandleWebSocketClient(ctx, ct);
+            return;
+        }
+
+        // ===== FLEX KNOB WebSocket (dashboard port — browser Web Serial bridge) =====
+        if (readOnly && path == "/wsflexknob" && ctx.Request.IsWebSocketRequest && _flexknob != null)
+        {
+            await HandleFlexKnobWebSocket(ctx, ct);
+            return;
+        }
+
+        // ===== AUDIO PLAYER PAGE (dashboard port only, no auth required) =====
         if (readOnly && path == "/audio" && _streamer != null)
         {
             resp.ContentType = "text/html; charset=utf-8";
@@ -189,11 +238,72 @@ public class ApiServer : IDisposable
         {
             var trimmed = path.TrimEnd('/');
 
+            // ===== AUTH ENDPOINTS (port 5002 only) =====
+            if (readOnly && trimmed == "/api/auth/login" && ctx.Request.HttpMethod == "POST")
+            {
+                await HandleLogin(ctx);
+                return;
+            }
+            if (readOnly && trimmed == "/api/auth/logout")
+            {
+                HandleLogout(ctx);
+                return;
+            }
+            if (readOnly && trimmed == "/api/auth/status")
+            {
+                var token = GetSessionToken(ctx);
+                var valid = _auth?.ValidateSession(token) ?? false;
+                var isAdmin = valid && (_auth?.IsAdmin(token) ?? false);
+                var canTx = valid && (_auth?.CanTransmit(token) ?? false);
+                var username = valid ? _auth?.GetUsername(token) : null;
+                WriteJson(resp, new { status = "ok", authenticated = valid, is_admin = isAdmin, can_transmit = canTx, username, token = valid ? token : null });
+                return;
+            }
+            if (readOnly && trimmed == "/api/auth/setup" && ctx.Request.HttpMethod == "POST")
+            {
+                await HandlePasswordSetup(ctx);
+                return;
+            }
+
+            // ===== ADMIN ENDPOINTS (port 5002, authenticated + admin role) =====
+            if (readOnly && trimmed.StartsWith("/api/admin/"))
+            {
+                var token = GetSessionToken(ctx);
+                if (_auth == null || !_auth.IsAdmin(token))
+                {
+                    resp.StatusCode = 403;
+                    WriteJson(resp, new { status = "error", message = "Admin access required" });
+                    return;
+                }
+
+                var adminResult = await HandleAdminRoute(trimmed, ctx);
+                if (adminResult != null) { WriteJson(resp, adminResult); return; }
+            }
+
+            // ===== PTT / TX PERMISSION GATE =====
+            if (readOnly && (trimmed == "/api/ptt/on" || trimmed == "/api/ptt/off" ||
+                             trimmed == "/api/ptt/key" || trimmed == "/api/ptt/unkey" ||
+                             trimmed == "/api/ptt/toggle"))
+            {
+                var token = GetSessionToken(ctx);
+                if (_auth != null && !_auth.CanTransmit(token))
+                {
+                    resp.StatusCode = 403;
+                    WriteJson(resp, new { status = "error", message = "Transmit not permitted for this account" });
+                    return;
+                }
+            }
+
+            // ===== PORT 5002 AUTH GATE =====
             if (readOnly && !ReadOnlyRoutes.Contains(trimmed))
             {
-                resp.StatusCode = 403;
-                WriteJson(resp, new { status = "error", message = "Read-only dashboard — control routes are not available" });
-                return;
+                var token = GetSessionToken(ctx);
+                if (_auth == null || !_auth.ValidateSession(token))
+                {
+                    resp.StatusCode = 401;
+                    WriteJson(resp, new { status = "error", message = "Authentication required" });
+                    return;
+                }
             }
 
             object? result = Route(trimmed);
@@ -248,13 +358,54 @@ public class ApiServer : IDisposable
     private object? Route(string path)
     {
         if (path == "/api/test") return new { ok = true, message = "API is working" };
-        if (path == "/api/health") return new { status = "ok", service = "HamDeck API (C#)", version = "2.1", port = _config.APIPort, rig_connected = _radio.Connected, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
+        if (path == "/api/health") return new { status = "ok", service = "HamDeck API (C#)", version = "3.1", port = _config.APIPort, rig_connected = _radio.Connected, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
 
         if (path == "/api/status")
         {
             if (!_radio.Connected)
                 return new { connected = false, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
-            return new { connected = true, freq = _radio.GetFreq(), mode = _radio.GetMode(), vfo = _radio.GetVFO(), power = _radio.GetPower(), tx = _radio.GetTXStatus(), split = _radio.GetSplit(), ant = _radio.GetAntenna(), rxant = _radio.GetRxAntenna(), amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
+
+            // Fast poll — only essential data (6 serial queries)
+            return new
+            {
+                connected = true,
+                freq = _radio.GetFreq(),
+                mode = _radio.GetMode(),
+                vfo = _radio.GetVFO(),
+                power = _radio.GetPower(),
+                tx = _radio.GetTXStatus(),
+                split = _radio.GetSplit(),
+                amp_tuning = _amp.IsActive,
+                tgxl_tuning = _tgxl.IsActive,
+                freq_buffer = _freqBuffer
+            };
+        }
+
+        if (path == "/api/status/full")
+        {
+            if (!_radio.Connected)
+                return new { connected = false };
+
+            // Slow poll — all toggle states (adds ~14 serial queries)
+            var rit = _radio.GetRIT();
+            return new
+            {
+                ant = _radio.GetAntenna(),
+                rxant = _radio.GetRxAntenna(),
+                nb = _radio.GetNB(),
+                nr = _radio.GetNR(),
+                notch = _radio.GetNotch(),
+                @lock = _radio.GetLock(),
+                preamp = _radio.GetPreamp(),
+                att = _radio.GetATT(),
+                agc = _radio.GetAGC(),
+                vox = _radio.GetVOX(),
+                comp = _radio.GetComp(),
+                rit = rit.On,
+                rit_offset = rit.Offset,
+                xit = _radio.GetXIT(),
+                rxant_km = _kmtronic?.ActiveAntenna ?? 0
+            };
         }
 
         if (path == "/api/mode/usb") { _radio.SetMode("USB"); return OK("mode", "USB"); }
@@ -288,6 +439,7 @@ public class ApiServer : IDisposable
 
         if (path is "/api/ptt/on" or "/api/ptt/key") { _radio.SetPTT(true); return OK("ptt", 1); }
         if (path is "/api/ptt/off" or "/api/ptt/unkey") { _radio.SetPTT(false); return OK("ptt", 0); }
+        if (path == "/api/ptt/toggle") { var c = _radio.GetTXStatus(); _radio.SetPTT(!c); return OK("ptt", !c); }
 
         if (path == "/api/power/qrp") { _radio.SetPower(5); return new { status = "ok", power = "qrp", watts = 5 }; }
         if (path == "/api/power/low") { _radio.SetPower(25); return new { status = "ok", power = "low", watts = 25 }; }
@@ -393,6 +545,11 @@ public class ApiServer : IDisposable
         if (path == "/api/agc/slow") { _radio.SetAGC("SLOW"); return OK("agc", "SLOW"); }
         if (path == "/api/agc/off") { _radio.SetAGC("OFF"); return OK("agc", "OFF"); }
         if (path == "/api/agc/auto") { _radio.SetAGC("AUTO"); return OK("agc", "AUTO"); }
+        if (path == "/api/agc/cycle") {
+            var cur = _radio.GetAGC();
+            var next = cur switch { "FAST" => "MID", "MID" => "SLOW", "SLOW" => "AUTO", "AUTO" => "OFF", _ => "FAST" };
+            _radio.SetAGC(next); return OK("agc", next);
+        }
 
         if (path == "/api/vox/on") { _radio.SetVOX(true); return OK("vox", 1); }
         if (path == "/api/vox/off") { _radio.SetVOX(false); return OK("vox", 0); }
@@ -403,11 +560,13 @@ public class ApiServer : IDisposable
 
         if (path == "/api/rit/on") { _radio.SetRIT(true); return OK("rit", 1); }
         if (path == "/api/rit/off") { _radio.SetRIT(false); return OK("rit", 0); }
+        if (path == "/api/rit/toggle") { var (on, _) = _radio.GetRIT(); _radio.SetRIT(!on); return OK("rit", !on); }
         if (path == "/api/rit/up") { var (_, o) = _radio.GetRIT(); _radio.SetRITOffset(o + 100); return OK("action", "up"); }
         if (path == "/api/rit/down") { var (_, o) = _radio.GetRIT(); _radio.SetRITOffset(o - 100); return OK("action", "down"); }
         if (path == "/api/rit/clear") { _radio.ClearRIT(); return OK("action", "clear"); }
         if (path == "/api/xit/on") { _radio.SetXIT(true); return OK("xit", 1); }
         if (path == "/api/xit/off") { _radio.SetXIT(false); return OK("xit", 0); }
+        if (path == "/api/xit/toggle") { var c = _radio.GetXIT(); _radio.SetXIT(!c); return OK("xit", !c); }
 
         if (path == "/api/cw-speed/get") return new { status = "ok", wpm = _radio.GetCWSpeed() };
         if (path == "/api/cw-speed/up") { var w = _radio.GetCWSpeed(); _radio.SetCWSpeed(w + 2); return OK("wpm", w + 2); }
@@ -486,6 +645,68 @@ public class ApiServer : IDisposable
             };
         }
 
+        if (path == "/api/tx-audio/status")
+        {
+            return new
+            {
+                status = "ok",
+                available = _txAudio != null,
+                active = _txAudio?.IsActive ?? false,
+                client_connected = _txAudio?.HasClient ?? false
+            };
+        }
+
+        if (path == "/api/tx-audio/devices")
+        {
+            var devices = AudioTransmitter.ListDevices();
+            return new
+            {
+                status = "ok",
+                devices = devices.Select(d => new { index = d.Index, name = d.Name }).ToList(),
+                current = _config.TxAudioDevice
+            };
+        }
+
+        // Remote TX mode — switches radio between MIC and USB audio source
+        if (path == "/api/remote-tx/on")
+        {
+            _radio.EnableRemoteTx();
+            return new { status = "ok", remote_tx = true, message = "SSB MOD SOURCE=REAR, REAR SELECT=USB" };
+        }
+        if (path == "/api/remote-tx/off")
+        {
+            _radio.DisableRemoteTx();
+            return new { status = "ok", remote_tx = false, message = "SSB MOD SOURCE=MIC" };
+        }
+        if (path == "/api/remote-tx/status")
+        {
+            return new
+            {
+                status = "ok",
+                mod_source_rear = _radio.GetSSBModSourceRear(),
+                rear_select_usb = _radio.GetRearSelectUSB(),
+                rport_gain = _radio.GetRPortGain()
+            };
+        }
+        if (path.StartsWith("/api/remote-tx/gain/") &&
+            int.TryParse(path["/api/remote-tx/gain/".Length..], out var rGain))
+        {
+            _radio.SetRPortGain(rGain);
+            return OK("rport_gain", rGain);
+        }
+
+        // SSB OUT LEVEL — controls RX audio volume to USB codec
+        if (path == "/api/ssb-out-level/get")
+        {
+            return new { status = "ok", level = _radio.GetSSBOutLevel() };
+        }
+        if (path.StartsWith("/api/ssb-out-level/set/") &&
+            int.TryParse(path["/api/ssb-out-level/set/".Length..], out var outLevel))
+        {
+            _radio.SetSSBOutLevel(outLevel);
+            return OK("ssb_out_level", outLevel);
+        }
+
         return null;
     }
 
@@ -526,6 +747,429 @@ public class ApiServer : IDisposable
         resp.ContentLength64 = buf.Length;
         resp.OutputStream.Write(buf);
         resp.Close();
+    }
+
+    // ===== AUTH HELPERS =====
+
+    private string? GetSessionToken(HttpListenerContext ctx)
+    {
+        // Check cookie first
+        var cookie = ctx.Request.Cookies["hamdeck_session"];
+        if (cookie != null) return cookie.Value;
+
+        // Check Authorization header
+        var authHeader = ctx.Request.Headers["Authorization"];
+        if (authHeader != null && authHeader.StartsWith("Bearer "))
+            return authHeader[7..];
+
+        // Check URL query parameter (for WebSocket through Cloudflare)
+        var query = ctx.Request.QueryString["token"];
+        if (!string.IsNullOrEmpty(query)) return query;
+
+        return null;
+    }
+
+    private async Task HandleLogin(HttpListenerContext ctx)
+    {
+        var resp = ctx.Response;
+        try
+        {
+            using var reader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8);
+            var body = await reader.ReadToEndAsync();
+            var login = JsonSerializer.Deserialize<LoginRequest>(body);
+
+            if (login == null || _auth == null)
+            {
+                resp.StatusCode = 400;
+                WriteJson(resp, new { status = "error", message = "Invalid request" });
+                return;
+            }
+
+            var token = _auth.Login(login.Username ?? "", login.Password ?? "");
+            if (token == null)
+            {
+                await Task.Delay(500);
+                resp.StatusCode = 401;
+                WriteJson(resp, new { status = "error", message = "Invalid credentials" });
+                return;
+            }
+
+            // Admin-only lockdown: reject non-admin logins after credentials check
+            if (_config.AdminOnlyLogin && !_auth.IsAdmin(token))
+            {
+                _auth.Logout(token); // clean up the session we just created
+                await Task.Delay(300);
+                resp.StatusCode = 403;
+                WriteJson(resp, new { status = "error", message = "Login is currently restricted to administrators" });
+                return;
+            }
+
+            var maxAge = (_config.WebSessionTimeout > 0 ? _config.WebSessionTimeout : 480) * 60;
+            resp.Headers.Add("Set-Cookie",
+                $"hamdeck_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={maxAge}");
+            WriteJson(resp, new { status = "ok", message = "Login successful" });
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("AUTH", "Login error: {0}", ex.Message);
+            resp.StatusCode = 500;
+            WriteJson(resp, new { status = "error", message = "Internal error" });
+        }
+    }
+
+    private void HandleLogout(HttpListenerContext ctx)
+    {
+        var token = GetSessionToken(ctx);
+        _auth?.Logout(token);
+        ctx.Response.Headers.Add("Set-Cookie",
+            "hamdeck_session=; Path=/; HttpOnly; Max-Age=0");
+        WriteJson(ctx.Response, new { status = "ok", message = "Logged out" });
+    }
+
+    private async Task HandlePasswordSetup(HttpListenerContext ctx)
+    {
+        var resp = ctx.Response;
+        if (_auth != null && _auth.IsConfigured)
+        {
+            resp.StatusCode = 403;
+            WriteJson(resp, new { status = "error", message = "Password already configured. Use admin panel to add users." });
+            return;
+        }
+        try
+        {
+            using var reader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8);
+            var body = await reader.ReadToEndAsync();
+            var setup = JsonSerializer.Deserialize<SetupRequest>(body);
+
+            if (setup == null || string.IsNullOrWhiteSpace(setup.Password) || setup.Password.Length < 6)
+            {
+                resp.StatusCode = 400;
+                WriteJson(resp, new { status = "error", message = "Password must be at least 6 characters" });
+                return;
+            }
+
+            var username = setup.Username?.Trim().ToLower() ?? "wa0o";
+            var hash = AuthService.HashPassword(setup.Password);
+
+            if (_auth == null)
+                _auth = new AuthService(_config.WebSessionTimeout);
+
+            _auth.AddUser(username, hash, isAdmin: true, canTransmit: true); // First user is admin
+
+            _config.WebUsers.Add(new Config.WebUser { Username = username, PasswordHash = hash, IsAdmin = true, CanTransmit = true });
+            _config.WebPasswordHash = hash;
+            _config.WebUsername = username;
+            _config.Save();
+
+            Logger.Info("AUTH", "Initial admin user '{0}' created", username);
+            WriteJson(resp, new { status = "ok", message = "Admin account created. Please log in." });
+        }
+        catch (Exception ex)
+        {
+            resp.StatusCode = 500;
+            WriteJson(resp, new { status = "error", message = ex.Message });
+        }
+    }
+
+    // ===== ADMIN HANDLERS =====
+
+    private async Task<object?> HandleAdminRoute(string path, HttpListenerContext ctx)
+    {
+        // List users
+        if (path == "/api/admin/users")
+            return new { status = "ok", users = _auth!.GetUsers() };
+
+        // List active sessions
+        if (path == "/api/admin/sessions")
+            return new { status = "ok", sessions = _auth!.GetActiveSessions() };
+
+        // Add user
+        if (path == "/api/admin/user/add" && ctx.Request.HttpMethod == "POST")
+        {
+            using var reader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8);
+            var body = await reader.ReadToEndAsync();
+            var req = JsonSerializer.Deserialize<AdminUserRequest>(body);
+
+            if (req == null || string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 6)
+                return new { status = "error", message = "Username and password (6+ chars) required" };
+
+            var hash = AuthService.HashPassword(req.Password);
+            _auth!.AddUser(req.Username, hash, req.IsAdmin, req.CanTransmit);
+
+            _config.WebUsers.Add(new Config.WebUser
+            {
+                Username = req.Username.Trim().ToLower(),
+                PasswordHash = hash,
+                IsAdmin = req.IsAdmin,
+                CanTransmit = req.CanTransmit
+            });
+            _config.Save();
+
+            return new { status = "ok", message = $"User '{req.Username}' added" };
+        }
+
+        // Remove user
+        if (path.StartsWith("/api/admin/user/remove/"))
+        {
+            var username = path["/api/admin/user/remove/".Length..];
+            if (_auth!.RemoveUser(username))
+            {
+                _config.WebUsers.RemoveAll(u => u.Username.Equals(username.Trim(), StringComparison.OrdinalIgnoreCase));
+                _config.Save();
+                return new { status = "ok", message = $"User '{username}' removed" };
+            }
+            return new { status = "error", message = "User not found" };
+        }
+
+        // Change password
+        if (path == "/api/admin/user/password" && ctx.Request.HttpMethod == "POST")
+        {
+            using var reader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8);
+            var body = await reader.ReadToEndAsync();
+            var req = JsonSerializer.Deserialize<AdminPasswordRequest>(body);
+
+            if (req == null || string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.NewPassword) || req.NewPassword.Length < 6)
+                return new { status = "error", message = "Username and new password (6+ chars) required" };
+
+            var hash = AuthService.HashPassword(req.NewPassword);
+            if (_auth!.ChangePassword(req.Username, hash))
+            {
+                var user = _config.WebUsers.Find(u => u.Username.Equals(req.Username.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (user != null) user.PasswordHash = hash;
+                _config.Save();
+                return new { status = "ok", message = $"Password changed for '{req.Username}'" };
+            }
+            return new { status = "error", message = "User not found" };
+        }
+
+        // Kill user sessions (force disconnect)
+        if (path.StartsWith("/api/admin/kick/"))
+        {
+            var username = path["/api/admin/kick/".Length..];
+            var count = _auth!.KillUserSessions(username);
+            return new { status = "ok", kicked = count, message = $"Killed {count} sessions for '{username}'" };
+        }
+
+        // ===== LOCKDOWN: admin-only login toggle =====
+        if (path == "/api/admin/lockdown/on")
+        {
+            _config.AdminOnlyLogin = true;
+            _config.Save();
+            Logger.Info("AUTH", "Admin-only lockdown ENABLED");
+            return new { status = "ok", admin_only_login = true, message = "Login restricted to admins" };
+        }
+        if (path == "/api/admin/lockdown/off")
+        {
+            _config.AdminOnlyLogin = false;
+            _config.Save();
+            Logger.Info("AUTH", "Admin-only lockdown DISABLED");
+            return new { status = "ok", admin_only_login = false, message = "All users may log in" };
+        }
+        if (path == "/api/admin/lockdown/status")
+        {
+            return new { status = "ok", admin_only_login = _config.AdminOnlyLogin };
+        }
+
+        // ===== PER-USER TX PERMISSION =====
+        // PUT /api/admin/user/tx/enable/{username}
+        // PUT /api/admin/user/tx/disable/{username}
+        if (path.StartsWith("/api/admin/user/tx/"))
+        {
+            var remainder = path["/api/admin/user/tx/".Length..]; // e.g. "enable/wa0o" or "disable/wa0o"
+            var slash = remainder.IndexOf('/');
+            if (slash > 0)
+            {
+                var action = remainder[..slash];   // "enable" or "disable"
+                var username = remainder[(slash + 1)..];
+                bool allow = action == "enable";
+
+                if (_auth!.SetUserCanTransmit(username, allow))
+                {
+                    var cfgUser = _config.WebUsers.Find(u =>
+                        u.Username.Equals(username.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (cfgUser != null) cfgUser.CanTransmit = allow;
+                    _config.Save();
+                    return new { status = "ok", username, can_transmit = allow };
+                }
+                return new { status = "error", message = $"User '{username}' not found" };
+            }
+        }
+
+        // Release mic (disconnect TX audio client)
+        if (path == "/api/admin/mic/release")
+        {
+            _txAudio?.Stop();
+            return new { status = "ok", message = "TX audio client disconnected" };
+        }
+
+        // Radio status
+        if (path == "/api/admin/radio")
+        {
+            return new
+            {
+                status = "ok",
+                connected = _radio.Connected,
+                port = _radio.PortName,
+                freq = _radio.LastFrequency,
+                mode = _radio.LastMode,
+                tx = _radio.LastTXState,
+                tx_audio_active = _txAudio?.IsActive ?? false,
+                tx_audio_client = _txAudio?.HasClient ?? false,
+                proxy_active = _radio.ProxyIsActive,
+                sessions = _auth!.ActiveSessionCount,
+                admin_only_login = _config.AdminOnlyLogin
+            };
+        }
+
+        // TX audio devices
+        if (path == "/api/admin/tx-devices")
+        {
+            var devices = AudioTransmitter.ListDevices();
+            return new
+            {
+                status = "ok",
+                devices = devices.Select(d => new { index = d.Index, name = d.Name }).ToList(),
+                current = _config.TxAudioDevice
+            };
+        }
+
+        // Set RPORT gain
+        if (path.StartsWith("/api/admin/rport-gain/") &&
+            int.TryParse(path["/api/admin/rport-gain/".Length..], out var gain))
+        {
+            _radio.SetRPortGain(gain);
+            return new { status = "ok", rport_gain = gain };
+        }
+
+        return null;
+    }
+
+    private class LoginRequest
+    {
+        [JsonPropertyName("username")] public string? Username { get; set; }
+        [JsonPropertyName("password")] public string? Password { get; set; }
+    }
+
+    private class SetupRequest
+    {
+        [JsonPropertyName("username")] public string? Username { get; set; }
+        [JsonPropertyName("password")] public string? Password { get; set; }
+    }
+
+    private class AdminUserRequest
+    {
+        [JsonPropertyName("username")] public string? Username { get; set; }
+        [JsonPropertyName("password")] public string? Password { get; set; }
+        [JsonPropertyName("is_admin")] public bool IsAdmin { get; set; }
+        [JsonPropertyName("can_transmit")] public bool CanTransmit { get; set; } = true;
+    }
+
+    private class AdminPasswordRequest
+    {
+        [JsonPropertyName("username")] public string? Username { get; set; }
+        [JsonPropertyName("new_password")] public string? NewPassword { get; set; }
+    }
+
+    private async Task HandleFlexKnobWebSocket(HttpListenerContext ctx, CancellationToken ct)
+    {
+        HttpListenerWebSocketContext? wsCtx = null;
+        try
+        {
+            wsCtx = await ctx.AcceptWebSocketAsync(null);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("FLEXKNOB-WS", "WebSocket upgrade failed: {0}", ex.Message);
+            ctx.Response.StatusCode = 500;
+            ctx.Response.Close();
+            return;
+        }
+
+        var ws = wsCtx.WebSocket;
+        Logger.Info("FLEXKNOB-WS", "Browser client connected from {0}", ctx.Request.RemoteEndPoint);
+
+        var sendLock = new SemaphoreSlim(1, 1);
+
+        async Task SafeSend(object data)
+        {
+            if (ws.State != WebSocketState.Open) return;
+            var buf = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(data));
+            await sendLock.WaitAsync(ct);
+            try
+            {
+                if (ws.State == WebSocketState.Open)
+                    await ws.SendAsync(buf, WebSocketMessageType.Text, true, ct);
+            }
+            catch { }
+            finally { sendLock.Release(); }
+        }
+
+        Action<string> onMode   = mode   => _ = SafeSend(new { type = "mode",   mode, step = _flexknob!.StepDisplay });
+        Action<string> onAction = action => _ = SafeSend(new { type = "action", action });
+
+        _flexknob!.OnModeChanged += onMode;
+        _flexknob!.OnAction      += onAction;
+
+        await SafeSend(new
+        {
+            type         = "state",
+            mode         = _flexknob.ModeName,
+            step         = _flexknob.StepDisplay,
+            hw_connected = _flexknob.IsConnected
+        });
+
+        try
+        {
+            var buf = new byte[4096];
+            while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
+            {
+                WebSocketReceiveResult result;
+                try { result = await ws.ReceiveAsync(buf, ct); }
+                catch { break; }
+
+                if (result.MessageType == WebSocketMessageType.Close) break;
+                if (result.MessageType != WebSocketMessageType.Text) continue;
+
+                var text = Encoding.UTF8.GetString(buf, 0, result.Count);
+                try
+                {
+                    using var doc = JsonDocument.Parse(text);
+                    var msgType = doc.RootElement.TryGetProperty("type", out var t) ? t.GetString() : null;
+
+                    if (msgType == "flexknob")
+                    {
+                        var cmd = doc.RootElement.TryGetProperty("cmd", out var c) ? c.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(cmd))
+                        {
+                            Logger.Debug("FLEXKNOB-WS", "Inject: {0}", cmd);
+                            _flexknob.InjectCommand(cmd!);
+                        }
+                    }
+                    else if (msgType == "ping")
+                    {
+                        await SafeSend(new { type = "pong" });
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    Logger.Warn("FLEXKNOB-WS", "Bad JSON: {0}", ex.Message);
+                }
+            }
+        }
+        finally
+        {
+            _flexknob.OnModeChanged -= onMode;
+            _flexknob.OnAction      -= onAction;
+
+            try
+            {
+                if (ws.State == WebSocketState.Open)
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None);
+            }
+            catch { }
+
+            Logger.Info("FLEXKNOB-WS", "Browser client disconnected");
+        }
     }
 
     public void Dispose()

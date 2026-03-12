@@ -155,13 +155,22 @@ public class TgxlTuner
                         }
 
                         // Check if tuning completed
+                        // GUARD: The TG-XL sends an initial burst of status messages
+                        // (tuning=0, tuning=1, tuning=0) all within milliseconds of
+                        // connecting. Ignore the 1→0 transition until at least 2s have
+                        // elapsed — real tuning takes 3-15 seconds.
                         if (tuningValue == "0")
                         {
-                            if (tuningSeen)
+                            if (tuningSeen && elapsed >= 2.0)
                             {
                                 Logger.Info("TGXL", "*** COMPLETE - tuning went 1→0 (status #{0}, {1:F1}s) ***", pollCount, elapsed);
                                 tuneComplete = true;
                                 break;
+                            }
+                            else if (tuningSeen && elapsed < 2.0)
+                            {
+                                Logger.Debug("TGXL", "Ignoring early 1→0 at {0:F1}s (initial burst)", elapsed);
+                                tuningSeen = false; // Reset — wait for the real tuning=1
                             }
                             else if (elapsed > 5)
                             {

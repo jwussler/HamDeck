@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HamDeck — Login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root {
+    --bg-deep: #0a0e17;
+    --bg-panel: #111827;
+    --bg-input: #1a2235;
+    --border: #1e2d44;
+    --border-focus: #3b82f6;
+    --text: #e2e8f0;
+    --text-dim: #64748b;
+    --accent: #3b82f6;
+    --accent-glow: rgba(59,130,246,0.25);
+    --error: #ef4444;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'IBM Plex Sans', -apple-system, sans-serif;
+}
+html,body { height:100%; }
+body {
+    font-family: var(--sans);
+    background: var(--bg-deep);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-image:
+        radial-gradient(ellipse at 20% 50%, rgba(59,130,246,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 50%, rgba(30,58,95,0.08) 0%, transparent 60%);
+}
+.login-card {
+    width: 100%;
+    max-width: 400px;
+    padding: 2.5rem;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 60px rgba(59,130,246,0.05);
+}
+.logo-area {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+.logo-area h1 {
+    font-family: var(--mono);
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--text);
+}
+.logo-area h1 span { color: var(--accent); }
+.logo-area .callsign {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-top: 0.3rem;
+    letter-spacing: 0.15em;
+}
+.setup-notice {
+    background: rgba(59,130,246,0.1);
+    border: 1px solid rgba(59,130,246,0.2);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.85rem;
+    color: var(--accent);
+    line-height: 1.5;
+    display: none;
+}
+.form-group {
+    margin-bottom: 1.25rem;
+}
+.form-group label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin-bottom: 0.4rem;
+}
+.form-group input {
+    width: 100%;
+    padding: 0.7rem 0.9rem;
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.form-group input:focus {
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.error-msg {
+    color: var(--error);
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+    display: none;
+    padding: 0.5rem 0.75rem;
+    background: rgba(239,68,68,0.1);
+    border-radius: 6px;
+}
+.btn-login {
+    width: 100%;
+    padding: 0.75rem;
+    font-family: var(--sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    letter-spacing: 0.02em;
+}
+.btn-login:hover { background: #2563eb; }
+.btn-login:active { transform: scale(0.98); }
+.btn-login:disabled {
+    background: var(--text-dim);
+    cursor: not-allowed;
+    transform: none;
+}
+.footer-note {
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 1.5rem;
+    line-height: 1.5;
+}
+</style>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#2d8cf0">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="HamDeck">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png"></head>
+<body>
+
+<div class="login-card">
+    <div class="logo-area">
+        <h1>HAM<span>DECK</span></h1>
+        <div class="callsign">RIG CONTROL</div>
+    </div>
+
+    <div id="setup-notice" class="setup-notice">
+        First-time setup — choose a username and password for web access.
+    </div>
+
+    <div id="error-msg" class="error-msg"></div>
+
+    <div class="form-group">
+        <label for="username">Callsign / Username</label>
+        <input type="text" id="username" autocomplete="username" spellcheck="false" autofocus>
+    </div>
+    <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password">
+    </div>
+
+    <button id="btn-login" class="btn-login">LOG IN</button>
+
+    <div class="footer-note">
+        Authenticated access to rig control.<br>
+        Read-only dashboard available without login.
+    </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let isSetup = false;
+
+async function checkAuthStatus() {
+    try {
+        const resp = await fetch(API + '/api/auth/status');
+        const data = await resp.json();
+        if (data.authenticated) {
+            window.location.href = '/';
+            return;
+        }
+    } catch {}
+
+    // Check if password is configured — if not, show setup mode
+    try {
+        const resp = await fetch(API + '/api/status');
+        const data = await resp.json();
+        // If we get here without auth and there's a special flag, it's setup mode
+        // We detect setup mode by trying a login with empty creds and checking the response
+    } catch {}
+}
+
+async function attemptLogin() {
+    const btn = document.getElementById('btn-login');
+    const errEl = document.getElementById('error-msg');
+    const user = document.getElementById('username').value.trim();
+    const pass = document.getElementById('password').value;
+
+    if (!user || !pass) {
+        errEl.textContent = 'Please enter both username and password.';
+        errEl.style.display = 'block';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'AUTHENTICATING...';
+    errEl.style.display = 'none';
+
+    try {
+        // Try login first
+        const loginResp = await fetch(API + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user, password: pass })
+        });
+
+        const data = await loginResp.json();
+
+        if (loginResp.ok) {
+            window.location.href = '/';
+            return;
+        }
+
+        // If 400 "Invalid request" — auth not configured yet, try setup
+        if (loginResp.status === 400 && data.message === 'Invalid request') {
+            if (pass.length < 6) {
+                errEl.textContent = 'Password must be at least 6 characters for first-time setup.';
+                errEl.style.display = 'block';
+            } else {
+                const setupResp = await fetch(API + '/api/auth/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+                const setupData = await setupResp.json();
+
+                if (setupResp.ok) {
+                    // Password set — now log in immediately
+                    const loginResp2 = await fetch(API + '/api/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: user, password: pass })
+                    });
+                    if (loginResp2.ok) {
+                        window.location.href = '/';
+                        return;
+                    }
+                    // If login still fails, prompt restart
+                    document.getElementById('setup-notice').style.display = 'block';
+                    document.getElementById('setup-notice').textContent =
+                        'Password saved! Please restart HamDeck, then log in.';
+                    btn.disabled = false;
+                    btn.textContent = 'LOG IN';
+                    return;
+                }
+                errEl.textContent = setupData.message || 'Setup failed.';
+                errEl.style.display = 'block';
+            }
+        } else {
+            errEl.textContent = data.message || 'Login failed.';
+            errEl.style.display = 'block';
+        }
+    } catch (e) {
+        errEl.textContent = 'Cannot reach HamDeck. Is it running?';
+        errEl.style.display = 'block';
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'LOG IN';
+}
+
+document.getElementById('btn-login').addEventListener('click', attemptLogin);
+document.getElementById('password').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') attemptLogin();
+});
+document.getElementById('username').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('password').focus();
+});
+
+checkAuthStatus();
+</script>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .catch(err => console.warn('SW registration failed:', err));
+            });
+        }
+    </script></body>
+</html>

@@ -7,7 +7,7 @@
     <RootNamespace>HamDeck</RootNamespace>
     <AssemblyName>HamDeck</AssemblyName>
     <ApplicationIcon>Resources\hamdeck.ico</ApplicationIcon>
-    <Version>2.1.0</Version>
+    <Version>3.1.0</Version>
     <Description>HamDeck - Ham Radio Control Application for Yaesu FTDX-101MP</Description>
     <Copyright>WA0O</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

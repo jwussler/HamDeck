@@ -648,6 +648,101 @@ public class RadioController : IDisposable
 
     public void SetRxAntenna(bool useRxAnt) => Send($"EX030103{(useRxAnt ? 1 : 0)};", false);
 
+    // ========== REMOTE TX AUDIO (USB CODEC) ==========
+    // CAT Reference: EX command, Table 2
+    // P1=01 (RADIO SETTING), P2=01 (MODE SSB)
+    //   P3=11: SSB MOD SOURCE — 0: MIC, 1: REAR
+    //   P3=12: REAR SELECT   — 0: DATA, 1: USB
+    //   P3=13: RPORT GAIN    — 000-100
+
+    private int _savedRPortGain = -1;
+
+    /// <summary>Get SSB modulation source: true = REAR (USB/DATA), false = MIC</summary>
+    public bool GetSSBModSourceRear()
+    {
+        var resp = Send("EX010111;");
+        return resp.Length >= 9 && resp[8] == '1';
+    }
+
+    /// <summary>Set SSB modulation source: true = REAR, false = MIC</summary>
+    public void SetSSBModSource(bool rear) => Send($"EX010111{(rear ? 1 : 0)};", false);
+
+    /// <summary>Get REAR port select: true = USB audio codec, false = DATA jack</summary>
+    public bool GetRearSelectUSB()
+    {
+        var resp = Send("EX010112;");
+        return resp.Length >= 9 && resp[8] == '1';
+    }
+
+    /// <summary>Set REAR port select: true = USB, false = DATA</summary>
+    public void SetRearSelect(bool usb) => Send($"EX010112{(usb ? 1 : 0)};", false);
+
+    /// <summary>Get RPORT gain (0-100)</summary>
+    public int GetRPortGain()
+    {
+        var resp = Send("EX010113;");
+        if (resp.StartsWith("EX010113") && resp.Length >= 11 &&
+            int.TryParse(resp[8..11], out var gain))
+            return gain;
+        return 50;
+    }
+
+    /// <summary>Set RPORT gain (0-100)</summary>
+    public void SetRPortGain(int gain) => Send($"EX010113{Math.Clamp(gain, 0, 100):D3};", false);
+
+    /// <summary>
+    /// Enable remote TX mode: sets SSB MOD SOURCE to REAR, REAR SELECT to USB,
+    /// and RPORT GAIN to 50 for browser mic levels.
+    /// Saves original RPORT GAIN for restore on disable.
+    /// </summary>
+    public void EnableRemoteTx()
+    {
+        _savedRPortGain = GetRPortGain();
+        SetSSBModSource(true);   // MOD SOURCE → REAR
+        Thread.Sleep(50);
+        SetRearSelect(true);     // REAR SELECT → USB
+        Thread.Sleep(50);
+        SetRPortGain(50);        // Set gain for browser mic
+        Logger.Info("RADIO", "Remote TX enabled (MOD=REAR, REAR=USB, RPORT GAIN=50, saved={0})", _savedRPortGain);
+    }
+
+    /// <summary>
+    /// Disable remote TX mode: sets SSB MOD SOURCE back to MIC and
+    /// restores original RPORT GAIN.
+    /// </summary>
+    public void DisableRemoteTx()
+    {
+        SetSSBModSource(false);  // MOD SOURCE → MIC
+        if (_savedRPortGain >= 0)
+        {
+            Thread.Sleep(50);
+            SetRPortGain(_savedRPortGain);
+            Logger.Info("RADIO", "Remote TX disabled (MOD=MIC, RPORT GAIN restored to {0})", _savedRPortGain);
+            _savedRPortGain = -1;
+        }
+        else
+        {
+            Logger.Info("RADIO", "Remote TX disabled (MOD=MIC)");
+        }
+    }
+
+    // ========== SSB OUT LEVEL (RX audio volume to USB) ==========
+    // EX command: P1=01 (RADIO SETTING), P2=01 (MODE SSB), P3=09 (SSB OUT LEVEL)
+    // P4 = 000-100
+
+    /// <summary>Get SSB OUT LEVEL (0-100) — controls audio volume sent to USB codec</summary>
+    public int GetSSBOutLevel()
+    {
+        var resp = Send("EX010109;");
+        if (resp.StartsWith("EX010109") && resp.Length >= 11 &&
+            int.TryParse(resp[8..11], out var level))
+            return level;
+        return 50;
+    }
+
+    /// <summary>Set SSB OUT LEVEL (0-100)</summary>
+    public void SetSSBOutLevel(int level) => Send($"EX010109{Math.Clamp(level, 0, 100):D3};", false);
+
     // ========== PORT DETECTION ==========
 
     public static string[] GetAvailablePorts() => SerialPort.GetPortNames();
