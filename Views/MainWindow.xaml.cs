@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _updateTimer;
     private TcpCatProxy? _catProxy;
     private AudioStreamer? _streamer;
+    private AudioTransmitter? _txAudio;
 
     private bool _running = true;
     private bool _forceExit;
@@ -60,7 +61,7 @@ public partial class MainWindow : Window
 
         var logLevel = _config.LogLevel == "debug" ? Services.LogLevel.Debug : Services.LogLevel.Info;
         Logger.Init(logLevel, _config.LogToFile);
-        Logger.Info("MAIN", "HamDeck v2.1 (C#) starting");
+        Logger.Info("MAIN", "HamDeck v3.0 (C#) starting");
 
         foreach (var err in _config.Validate())
             Logger.Warn("CONFIG", err);
@@ -110,7 +111,39 @@ public partial class MainWindow : Window
         _streamer.Start();
         _recorder.Streamer = _streamer;
 
-        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, streamer: _streamer);
+        // Web authentication for dashboard control
+        AuthService? auth = null;
+        if (_config.WebUsers.Count > 0 || !string.IsNullOrEmpty(_config.WebPasswordHash))
+        {
+            auth = new AuthService(_config.WebSessionTimeout);
+
+            // Load users from new multi-user config
+            foreach (var u in _config.WebUsers)
+                auth.AddUser(u.Username, u.PasswordHash, u.IsAdmin);
+
+            // Migrate legacy single-user config if no multi-user entries exist
+            if (_config.WebUsers.Count == 0 && !string.IsNullOrEmpty(_config.WebPasswordHash))
+            {
+                auth.AddUser(_config.WebUsername, _config.WebPasswordHash, true);
+                Logger.Info("MAIN", "Migrated legacy single-user auth to multi-user");
+            }
+
+            Logger.Info("MAIN", "Web authentication enabled ({0} users)", auth.ActiveSessionCount == 0 ? _config.WebUsers.Count + (_config.WebUsers.Count == 0 ? 1 : 0) : auth.ActiveSessionCount);
+        }
+        else
+        {
+            Logger.Warn("MAIN", "Web password not set — dashboard will prompt for setup on first visit");
+        }
+
+        // TX audio for remote transmit via browser mic
+        if (_config.TxAudioEnabled)
+        {
+            _txAudio = new AudioTransmitter(_config);
+            Logger.Info("MAIN", "TX audio enabled (device: {0})",
+                _config.TxAudioDevice >= 0 ? _config.TxAudioDevice.ToString() : "auto-detect");
+        }
+
+        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, streamer: _streamer, auth: auth, txAudio: _txAudio);
         if (_config.APIEnabled) _api.Start();
 
         // TCP CAT Proxy for N1MM and external loggers
@@ -847,6 +880,7 @@ public partial class MainWindow : Window
         _catProxy?.Dispose();
         _kmtronic?.Dispose();
         _streamer?.Dispose();
+        _txAudio?.Dispose();
         _api.Dispose();
         _radio.Disconnect();
         TrayIcon.Dispose();

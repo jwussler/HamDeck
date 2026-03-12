@@ -47,6 +47,25 @@ public class Config
     [JsonPropertyName("audio_stream_port")] public int AudioStreamPort { get; set; } = 5003;
     [JsonPropertyName("audio_stream_sample_rate")] public int AudioStreamSampleRate { get; set; } = 22050;
 
+    // Web authentication
+    [JsonPropertyName("web_username")] public string WebUsername { get; set; } = "wa0o";
+    [JsonPropertyName("web_password_hash")] public string WebPasswordHash { get; set; } = "";
+    [JsonPropertyName("web_session_timeout")] public int WebSessionTimeout { get; set; } = 480;
+    [JsonPropertyName("web_users")] public List<WebUser> WebUsers { get; set; } = new();
+    [JsonPropertyName("admin_only_login")] public bool AdminOnlyLogin { get; set; } = false;
+
+    public class WebUser
+    {
+        [JsonPropertyName("username")] public string Username { get; set; } = "";
+        [JsonPropertyName("password_hash")] public string PasswordHash { get; set; } = "";
+        [JsonPropertyName("is_admin")] public bool IsAdmin { get; set; }
+        [JsonPropertyName("can_transmit")] public bool CanTransmit { get; set; } = true;
+    }
+
+    // TX Audio (remote transmit via browser mic)
+    [JsonPropertyName("tx_audio_device")] public int TxAudioDevice { get; set; } = -1;
+    [JsonPropertyName("tx_audio_enabled")] public bool TxAudioEnabled { get; set; } = true;
+
     // TG-XL Tuner settings
     [JsonPropertyName("tgxl_host")] public string TGXLHost { get; set; } = "192.168.40.51";
     [JsonPropertyName("tgxl_port")] public int TGXLPort { get; set; } = 9010;
@@ -148,6 +167,7 @@ public class Config
         if (KmtronicPort == 0) KmtronicPort = 12345;
         if (WavelogStationID == 0) WavelogStationID = 1;
         if (ClusterPollInterval == 0) ClusterPollInterval = 30;
+        if (WebSessionTimeout == 0) WebSessionTimeout = 480;
         if (string.IsNullOrEmpty(ClusterAPIURL)) ClusterAPIURL = "https://api.wa0o.com/dxcache/spots";
         if (string.IsNullOrEmpty(RecordPath)) RecordPath = DefaultRecordPath;
         if (string.IsNullOrEmpty(PTTRecordPath)) PTTRecordPath = DefaultPTTRecordPath;

@@ -1,4 +1,4 @@
-# HamDeck v2.1
+# HamDeck v3.0
 
 **Ham Radio Control Hub for Yaesu FTDX-101MP**
 
@@ -10,7 +10,7 @@ HamDeck is a Windows desktop application that provides centralized control of a 
 
 ## Installation
 
-1. Download `HamDeck-v2.1-Setup.exe` from the [Releases](https://github.com/jwussler/HamDeck/releases) page
+1. Download `HamDeck-v3.0-Setup.exe` from the [Releases](https://github.com/jwussler/HamDeck/releases) page
 2. Run the installer — no .NET installation required (self-contained)
 3. Launch HamDeck from the Start Menu or Desktop shortcut
 4. Click **Settings** to configure your COM port and baud rate
@@ -160,7 +160,7 @@ To build the installer (requires [Inno Setup 6](https://jrsoftware.org/isinfo.ph
 build-installer.bat
 ```
 
-Output: `installer\HamDeck-v2.1-Setup.exe`
+Output: `installer\HamDeck-v3.0-Setup.exe`
 
 ## Architecture
 
