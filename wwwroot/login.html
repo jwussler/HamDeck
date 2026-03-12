@@ -139,7 +139,13 @@ body {
     line-height: 1.5;
 }
 </style>
-</head>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#2d8cf0">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="HamDeck">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png"></head>
 <body>
 
 <div class="login-card">
@@ -284,5 +290,12 @@ document.getElementById('username').addEventListener('keydown', (e) => {
 checkAuthStatus();
 </script>
 
-</body>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .catch(err => console.warn('SW registration failed:', err));
+            });
+        }
+    </script></body>
 </html>

@@ -47,7 +47,13 @@
 .msg-err { background: var(--red-dim); color: var(--red); }
 .log-box { font-family: var(--mono); font-size: 0.72rem; color: var(--text-dim); background: var(--bg-deep); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.5rem; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 </style>
-</head>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#2d8cf0">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="HamDeck">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png"></head>
 <body>
 
 <header class="topbar">
@@ -325,5 +331,12 @@ async function init() {
 }
 init();
 </script>
-</body>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .catch(err => console.warn('SW registration failed:', err));
+            });
+        }
+    </script></body>
 </html>
