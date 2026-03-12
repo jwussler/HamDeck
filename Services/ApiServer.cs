@@ -358,7 +358,7 @@ public class ApiServer : IDisposable
     private object? Route(string path)
     {
         if (path == "/api/test") return new { ok = true, message = "API is working" };
-        if (path == "/api/health") return new { status = "ok", service = "HamDeck API (C#)", version = "3.2", port = _config.APIPort, rig_connected = _radio.Connected, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
+        if (path == "/api/health") return new { status = "ok", service = "HamDeck API (C#)", version = "3.3", port = _config.APIPort, rig_connected = _radio.Connected, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
 
         if (path == "/api/status")
         {
