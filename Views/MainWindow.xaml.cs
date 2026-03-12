@@ -61,7 +61,7 @@ public partial class MainWindow : Window
 
         var logLevel = _config.LogLevel == "debug" ? Services.LogLevel.Debug : Services.LogLevel.Info;
         Logger.Init(logLevel, _config.LogToFile);
-        Logger.Info("MAIN", "HamDeck v3.1 (C#) starting");
+        Logger.Info("MAIN", "HamDeck v3.3 (C#) starting");
 
         foreach (var err in _config.Validate())
             Logger.Warn("CONFIG", err);
@@ -88,8 +88,7 @@ public partial class MainWindow : Window
         _flexknob.SetStep(_config.FlexknobDefaultStep);
         _flexknob.OnModeChanged += mode => Dispatcher.Invoke(() =>
         {
-            FlexModeBtn.Content = mode;
-            FlexStepBtn.Content = $"{_flexknob.StepDisplay} Hz";
+            // Status text updated in UpdateTick via FlexKnobStatus
         });
         _flexknob.OnAction += action => Dispatcher.Invoke(() =>
         {
@@ -117,25 +116,22 @@ public partial class MainWindow : Window
         {
             auth = new AuthService(_config.WebSessionTimeout);
 
-            // Load users from new multi-user config
             foreach (var u in _config.WebUsers)
                 auth.AddUser(u.Username, u.PasswordHash, u.IsAdmin);
 
-            // Migrate legacy single-user config if no multi-user entries exist
             if (_config.WebUsers.Count == 0 && !string.IsNullOrEmpty(_config.WebPasswordHash))
             {
                 auth.AddUser(_config.WebUsername, _config.WebPasswordHash, true);
                 Logger.Info("MAIN", "Migrated legacy single-user auth to multi-user");
             }
 
-            Logger.Info("MAIN", "Web authentication enabled ({0} users)", auth.ActiveSessionCount == 0 ? _config.WebUsers.Count + (_config.WebUsers.Count == 0 ? 1 : 0) : auth.ActiveSessionCount);
+            Logger.Info("MAIN", "Web authentication enabled ({0} users)", _config.WebUsers.Count > 0 ? _config.WebUsers.Count : 1);
         }
         else
         {
             Logger.Warn("MAIN", "Web password not set — dashboard will prompt for setup on first visit");
         }
 
-        // TX audio for remote transmit via browser mic
         if (_config.TxAudioEnabled)
         {
             _txAudio = new AudioTransmitter(_config);
@@ -146,7 +142,6 @@ public partial class MainWindow : Window
         _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, streamer: _streamer, auth: auth, txAudio: _txAudio, flexknob: _flexknob);
         if (_config.APIEnabled) _api.Start();
 
-        // TCP CAT Proxy for N1MM and external loggers
         if (_config.CatProxyEnabled)
         {
             _catProxy = new TcpCatProxy(_radio, _config.CatProxyPort);
@@ -286,12 +281,7 @@ public partial class MainWindow : Window
     {
         if (!_running) return;
 
-        // Yield to TCP proxy — if N1MM sent a command in the last 300ms, skip this
-        // poll cycle so the proxy command isn't queued behind 7 serial round-trips
         if (Environment.TickCount64 - _radio.LastProxyActivityMs < 300) return;
-
-        // Yield to FlexKnob — during active rotation, skip the poll cycle
-        // so knob commands don't fight with 7 serial round-trips
         if (_flexknob.IsActive) return;
 
         // ===== DISCONNECTED STATE =====
@@ -300,7 +290,7 @@ public partial class MainWindow : Window
             if (_wasConnected)
             {
                 _wasConnected = false;
-                Logger.Warn("RADIO", "Radio disconnected \u2014 will auto-reconnect every {0}s", ReconnectInterval.TotalSeconds);
+                Logger.Warn("RADIO", "Radio disconnected — will auto-reconnect every {0}s", ReconnectInterval.TotalSeconds);
 
                 ConnStatus.Text = "\u25CF Disconnected";
                 ConnStatus.Foreground = FindResource("ErrorBrush") as SolidColorBrush;
@@ -316,7 +306,7 @@ public partial class MainWindow : Window
 
                 if (_autoRecordActive)
                 {
-                    Logger.Info("RECORD", "Radio lost \u2014 saving PTT recording");
+                    Logger.Info("RECORD", "Radio lost — saving PTT recording");
                     StopPTTRecording();
                 }
                 _lastPTTState = false;
@@ -469,7 +459,6 @@ public partial class MainWindow : Window
                 _lastBand = band;
             }
 
-            // Feed audio streamer with current radio state (no extra CAT calls)
             _streamer?.UpdateStatus(freq, mode, band, power, pttActive, true);
 
             StatsLabel.Text = $"Session: {_stats.SessionDuration} | QSY: {_stats.QSYCount} | TX: {_stats.PTTCount} | TX Time: {_stats.TXTimeDisplay}";
@@ -499,10 +488,7 @@ public partial class MainWindow : Window
                 if (_autoRecordActive && _autoRecordTimer != default)
                 {
                     var remaining = (_autoRecordTimer - DateTime.UtcNow).TotalSeconds;
-                    if (remaining > 0)
-                        RecordTime.Text = $"{elapsed:F0}s (-{remaining:F0}s)";
-                    else
-                        RecordTime.Text = $"{elapsed:F0}s";
+                    RecordTime.Text = remaining > 0 ? $"{elapsed:F0}s (-{remaining:F0}s)" : $"{elapsed:F0}s";
                 }
                 else
                 {
@@ -580,138 +566,7 @@ public partial class MainWindow : Window
         });
     }
 
-    // ========== BAND ==========
-
-    private async void Band_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button btn && btn.Tag is string band)
-        {
-            if (!BandHelper.BandFrequencies.TryGetValue(band, out var freq)) return;
-            var mode = BandHelper.GetModeForFrequency(freq);
-            _radio.SetFreq(freq);
-            await Task.Delay(100);
-            _radio.SetMode(mode);
-        }
-    }
-
-    // ========== MODE ==========
-
-    private void Mode_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button btn && btn.Tag is string mode)
-            _radio.SetMode(mode);
-    }
-
-    // ========== VFO ==========
-
-    private void VfoA_Click(object s, RoutedEventArgs e) => _radio.SetVFO("A");
-    private void VfoB_Click(object s, RoutedEventArgs e) => _radio.SetVFO("B");
-    private void VfoSwap_Click(object s, RoutedEventArgs e) => _radio.SwapVFO();
-    private void VfoCopyAB_Click(object s, RoutedEventArgs e) => _radio.CopyVFO("A", "B");
-    private void SplitToggle_Click(object s, RoutedEventArgs e)
-    { var c = _radio.GetSplit(); _radio.SetSplit(!c); }
-
-    // ========== POWER ==========
-
-    private void Power_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button btn && btn.Tag is string watts && int.TryParse(watts, out var w))
-            _radio.SetPower(w);
-    }
-
-    // ========== TUNERS ==========
-
-    private void Tune_Click(object s, RoutedEventArgs e) => _radio.StartTune();
-    private void TgxlTune_Click(object s, RoutedEventArgs e) => _tgxl.Tune();
-    private void AmpTune_Click(object s, RoutedEventArgs e) => _amp.Tune();
-
-    // ========== FILTERS ==========
-
-    private void ToggleNB_Click(object s, RoutedEventArgs e) { var c = _radio.GetNB(); _radio.SetNB(!c); }
-    private void ToggleNR_Click(object s, RoutedEventArgs e) { var c = _radio.GetNR(); _radio.SetNR(!c); }
-    private void ToggleNotch_Click(object s, RoutedEventArgs e) { var c = _radio.GetNotch(); _radio.SetNotch(!c); }
-    private void ToggleVOX_Click(object s, RoutedEventArgs e) { var c = _radio.GetVOX(); _radio.SetVOX(!c); }
-    private void ToggleComp_Click(object s, RoutedEventArgs e) { var c = _radio.GetComp(); _radio.SetComp(!c); }
-    private void CyclePreamp_Click(object s, RoutedEventArgs e) => _radio.CyclePreamp();
-    private void ToggleATT_Click(object s, RoutedEventArgs e) { var c = _radio.GetATT(); _radio.SetATT(!c); }
-    private void ToggleLock_Click(object s, RoutedEventArgs e) { var c = _radio.GetLock(); _radio.SetLock(!c); }
-    private void ToggleAntenna_Click(object s, RoutedEventArgs e) => _radio.ToggleAntenna();
-    private void Ant1_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(1);
-    private void Ant2_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(2);
-    private void RxAnt_Click(object s, RoutedEventArgs e) => _radio.SetAntenna(3);
-
-    // ========== MUTE ==========
-
-    private void MuteToggle_Click(object s, RoutedEventArgs e)
-    {
-        if (_radio.GetAFGain() > 0) _radio.SetAFGain(0);
-        else _radio.SetAFGain(128);
-    }
-
-    private void MuteSubToggle_Click(object s, RoutedEventArgs e)
-    {
-        if (_radio.GetSubAFGain() > 0) _radio.SetSubAFGain(0);
-        else _radio.SetSubAFGain(128);
-    }
-
-    private void MuteAllToggle_Click(object s, RoutedEventArgs e)
-    {
-        bool mainMuted = _radio.GetAFGain() == 0;
-        bool subMuted = _radio.GetSubAFGain() == 0;
-        if (mainMuted && subMuted)
-        {
-            _radio.SetAFGain(128);
-            _radio.SetSubAFGain(128);
-        }
-        else
-        {
-            _radio.SetAFGain(0);
-            _radio.SetSubAFGain(0);
-        }
-    }
-
-    private void CycleAGC_Click(object s, RoutedEventArgs e)
-    {
-        var current = _radio.GetAGC();
-        var next = current switch
-        {
-            "FAST" => "MID", "MID" => "SLOW", "SLOW" => "AUTO", "AUTO" => "OFF", _ => "FAST"
-        };
-        _radio.SetAGC(next);
-    }
-
     // ========== FLEXKNOB ==========
-
-    private void FlexMode_Click(object s, RoutedEventArgs e)
-    {
-        _flexknob.CycleMode();
-        FlexModeBtn.Content = _flexknob.ModeName;
-        FlexStepBtn.Content = $"{_flexknob.StepDisplay} Hz";
-    }
-
-    private void FlexStep_Click(object s, RoutedEventArgs e)
-    {
-        _flexknob.CycleStep();
-        FlexStepBtn.Content = $"{_flexknob.StepDisplay} Hz";
-    }
-
-    private void FlexSetVol_Click(object s, RoutedEventArgs e)
-    {
-        _flexknob.SetMode(FlexKnobController.KnobMode.Volume);
-        FlexModeBtn.Content = _flexknob.ModeName;
-    }
-
-    private void FlexSetRIT_Click(object s, RoutedEventArgs e)
-    {
-        _flexknob.SetMode(FlexKnobController.KnobMode.RIT);
-        FlexModeBtn.Content = _flexknob.ModeName;
-    }
-
-    private void FlexClearRIT_Click(object s, RoutedEventArgs e)
-    {
-        _radio.ClearRIT();
-        Logger.Info("FLEXKNOB", "RIT cleared from UI");
-    }
 
     private void FlexConnect_Click(object s, RoutedEventArgs e)
     {
@@ -764,39 +619,12 @@ public partial class MainWindow : Window
         System.Diagnostics.Process.Start("explorer.exe", pathToOpen);
     }
 
-    // ========== FREQUENCY ENTRY ==========
+    // ========== DASHBOARD ==========
 
-    private void FreqEntry_KeyDown(object sender, KeyEventArgs e)
+    private void OpenDashboard_Click(object sender, RoutedEventArgs e)
     {
-        if (e.Key == Key.Enter) FreqGo_Click(sender, e);
-    }
-
-    private void FreqGo_Click(object s, RoutedEventArgs e)
-    {
-        var hz = FrequencyHelper.Parse(FreqEntry.Text);
-        if (hz > 0)
-        {
-            var mode = BandHelper.GetModeForFrequency(hz);
-            _radio.SetMode(mode);
-            _radio.SetFreq(hz);
-            FreqEntry.Clear();
-        }
-    }
-
-    // ========== DX CLUSTER ==========
-
-    private DxClusterWindow? _clusterWindow;
-
-    private void DxCluster_Click(object sender, RoutedEventArgs e)
-    {
-        if (_clusterWindow != null)
-        {
-            _clusterWindow.Activate();
-            return;
-        }
-        _clusterWindow = new DxClusterWindow(_cluster, _radio, _config) { Owner = this };
-        _clusterWindow.Closed += (s, a) => _clusterWindow = null;
-        _clusterWindow.Show();
+        var url = "http://localhost:5002";
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
     }
 
     // ========== SETTINGS ==========
@@ -810,7 +638,6 @@ public partial class MainWindow : Window
             _config.Save();
             Logger.Info("SETTINGS", "Configuration saved");
 
-            // Restart CAT proxy if its settings changed
             _catProxy?.Dispose();
             _catProxy = null;
             if (_config.CatProxyEnabled)
@@ -843,10 +670,7 @@ public partial class MainWindow : Window
         Activate();
     }
 
-    private void TrayExit_Click(object sender, RoutedEventArgs e)
-    {
-        ForceExit();
-    }
+    private void TrayExit_Click(object sender, RoutedEventArgs e) => ForceExit();
 
     private void ForceExit()
     {

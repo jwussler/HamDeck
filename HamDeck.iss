@@ -3,7 +3,7 @@
 ; Then compile this script with Inno Setup
 
 #define MyAppName "HamDeck"
-#define MyAppVersion "3.1.0"
+#define MyAppVersion "3.3.0"
 #define MyAppPublisher "WA0O"
 #define MyAppURL "https://wa0o.com"
 #define MyAppExeName "HamDeck.exe"
@@ -20,7 +20,7 @@ AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputBaseFilename=HamDeck-v3.1-Setup
+OutputBaseFilename=HamDeck-v3.3-Setup
 OutputDir=installer
 Compression=lzma2/ultra64
 SolidCompression=yes
