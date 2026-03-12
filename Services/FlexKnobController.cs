@@ -280,7 +280,17 @@ public class FlexKnobController : IDisposable
 
     // ========== COMMAND PARSING ==========
 
-    private void ProcessCommand(string input, int cmdNum)
+    // ===== WEB SERIAL BRIDGE =====
+    private int _webCmdSeq;
+
+    /// <summary>
+    /// Inject a command from the Web Serial WebSocket bridge (browser → WebSocket → here).
+    /// Functionally identical to hardware input — uses the same parser and throttle logic.
+    /// </summary>
+    public void InjectCommand(string cmd) =>
+        ProcessCommand(cmd, Interlocked.Increment(ref _webCmdSeq) + 100_000);
+
+    internal void ProcessCommand(string input, int cmdNum)
     {
         input = input.Trim().ToUpper();
         if (string.IsNullOrEmpty(input)) return;

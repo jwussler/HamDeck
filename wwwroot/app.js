@@ -861,3 +861,169 @@ async function init() {
 }
 
 init();
+
+// ============================================================
+//  FLEXKNOB — Web Serial bridge + /wsflexknob WebSocket
+// ============================================================
+
+(function () {
+    const WS_PATH  = "/wsflexknob";
+    const PING_MS  = 20000;
+
+    let fkWs        = null;
+    let fkPingTimer = null;
+    let fkReconnect = null;
+
+    const dot      = document.getElementById("fk-dot");
+    const status   = document.getElementById("fk-status");
+    const modeEl   = document.getElementById("fk-mode");
+    const stepEl   = document.getElementById("fk-step");
+    const actionEl = document.getElementById("fk-action");
+    const btnConn  = document.getElementById("fk-btn-connect");
+    const btnDisc  = document.getElementById("fk-btn-disconnect");
+
+    function setDot(el, color) {
+        el.style.background  = `var(--${color})`;
+        el.style.boxShadow   = `0 0 6px var(--${color})`;
+    }
+
+    // ── WebSocket to server ───────────────────────────────────
+    function fkWsUrl() {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const token = new URLSearchParams(location.search).get("token");
+        const base  = `${proto}//${location.host}${WS_PATH}`;
+        return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+    }
+
+    function fkWsConnect() {
+        clearTimeout(fkReconnect);
+        try { fkWs = new WebSocket(fkWsUrl()); } catch { schedFkReconnect(); return; }
+
+        fkWs.onopen = () => {
+            fkPingTimer = setInterval(() => {
+                if (fkWs && fkWs.readyState === 1) fkWs.send(JSON.stringify({type:"ping"}));
+            }, PING_MS);
+        };
+
+        fkWs.onmessage = (ev) => {
+            try {
+                const msg = JSON.parse(ev.data);
+                if (msg.type === "state" || msg.type === "mode") {
+                    if (modeEl) modeEl.textContent = msg.mode || "—";
+                    if (stepEl) stepEl.textContent = msg.step || "—";
+                }
+                if (msg.type === "action" && actionEl) {
+                    actionEl.textContent = msg.action || "";
+                    clearTimeout(actionEl._t);
+                    actionEl._t = setTimeout(() => { actionEl.textContent = ""; }, 2500);
+                }
+            } catch {}
+        };
+
+        fkWs.onerror = () => {};
+        fkWs.onclose = () => { clearInterval(fkPingTimer); schedFkReconnect(); };
+    }
+
+    function schedFkReconnect() {
+        clearTimeout(fkReconnect);
+        fkReconnect = setTimeout(fkWsConnect, 3000);
+    }
+
+    function sendFkCmd(cmd) {
+        if (fkWs && fkWs.readyState === 1)
+            fkWs.send(JSON.stringify({type:"flexknob", cmd}));
+    }
+
+    fkWsConnect();
+
+    // ── Web Serial ────────────────────────────────────────────
+    let serialPort   = null;
+    let serialReader = null;
+    let serialActive = false;
+    let lineBuffer   = "";
+
+    if (btnConn) btnConn.addEventListener("click", async () => {
+        if (!("serial" in navigator)) {
+            alert("Web Serial API not supported.\nUse Chrome or Edge on a desktop.");
+            return;
+        }
+        try {
+            const port = await navigator.serial.requestPort();
+            const baud = parseInt(document.getElementById("fk-baud").value, 10);
+            await openPort(port, baud);
+        } catch(e) {
+            setDot(dot, "red");
+            if (status) status.textContent = "Failed: " + e.message;
+        }
+    });
+
+    if (btnDisc) btnDisc.addEventListener("click", async () => {
+        serialActive = false;
+        try { if (serialReader) { await serialReader.cancel(); serialReader = null; } } catch {}
+        try { if (serialPort) { await serialPort.close(); serialPort = null; } } catch {}
+        setDot(dot, "red");
+        if (status) status.textContent = "Not connected";
+        btnConn.disabled = false;
+        btnConn.style.opacity = "1";
+        btnDisc.disabled = true;
+        btnDisc.style.opacity = "0.4";
+    });
+
+    async function readSerialLoop() {
+        const decoder = new TextDecoderStream();
+        serialPort.readable.pipeTo(decoder.writable);
+        serialReader = decoder.readable.getReader();
+        try {
+            while (serialActive) {
+                const { value, done } = await serialReader.read();
+                if (done) break;
+                lineBuffer += value;
+                const delim = lineBuffer.includes(";") ? ";" : "\n";
+                const parts = lineBuffer.split(delim);
+                lineBuffer  = parts.pop();
+                for (const part of parts) {
+                    const cmd = part.trim().toUpperCase();
+                    if (cmd) sendFkCmd(cmd);
+                }
+            }
+        } catch(e) {
+            if (serialActive) {
+                setDot(dot, "red");
+                if (status) status.textContent = "Read error: " + e.message;
+                serialActive = false;
+                btnConn.disabled = false;
+                btnConn.style.opacity = "1";
+                btnDisc.disabled = true;
+                btnDisc.style.opacity = "0.4";
+            }
+        }
+    }
+
+    async function openPort(port, baud) {
+        serialPort = port;
+        await serialPort.open({ baudRate: baud, dataBits: 8, stopBits: 1, parity: "none", flowControl: "none" });
+        serialActive = true;
+        localStorage.setItem("fk_baud", baud);
+        setDot(dot, "green");
+        if (status) status.textContent = `Connected at ${baud} baud`;
+        if (btnConn) { btnConn.disabled = true;  btnConn.style.opacity = "0.4"; }
+        if (btnDisc) { btnDisc.disabled = false;  btnDisc.style.opacity = "1";  }
+        const baudSel = document.getElementById("fk-baud");
+        if (baudSel) baudSel.value = String(baud);
+        readSerialLoop();
+    }
+
+    // Auto-reconnect on page load if browser already has a granted port
+    if ("serial" in navigator) {
+        navigator.serial.getPorts().then(ports => {
+            if (ports.length === 1 && !serialActive) {
+                const savedBaud = parseInt(localStorage.getItem("fk_baud") || "115200", 10);
+                if (status) status.textContent = "Auto-connecting…";
+                openPort(ports[0], savedBaud).catch(() => {
+                    if (status) status.textContent = "Auto-connect failed — click Connect";
+                    setDot(dot, "red");
+                });
+            }
+        });
+    }
+})();

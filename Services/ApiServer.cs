@@ -32,6 +32,7 @@ public class ApiServer : IDisposable
     private readonly SessionStats? _stats;
     private readonly AudioStreamer? _streamer;
     private readonly AudioTransmitter? _txAudio;
+    private readonly FlexKnobController? _flexknob;
     private AuthService? _auth;
     private HttpListener? _listener;
     private HttpListener? _dashboardListener;
@@ -72,7 +73,7 @@ public class ApiServer : IDisposable
                      TgxlTuner tgxl, AmpTuner amp, KmtronicService? kmtronic = null,
                      DxClusterClient? cluster = null, SessionStats? stats = null,
                      AudioStreamer? streamer = null, AuthService? auth = null,
-                     AudioTransmitter? txAudio = null)
+                     AudioTransmitter? txAudio = null, FlexKnobController? flexknob = null)
     {
         _radio = radio;
         _recorder = recorder;
@@ -85,6 +86,7 @@ public class ApiServer : IDisposable
         _streamer = streamer;
         _auth = auth;
         _txAudio = txAudio;
+        _flexknob = flexknob;
 
         var exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".";
         _wwwroot = Path.Combine(exeDir, "wwwroot");
@@ -211,6 +213,13 @@ public class ApiServer : IDisposable
 
             Logger.Info("API", "TX audio WebSocket accepted");
             await _txAudio.HandleWebSocketClient(ctx, ct);
+            return;
+        }
+
+        // ===== FLEX KNOB WebSocket (dashboard port — browser Web Serial bridge) =====
+        if (readOnly && path == "/wsflexknob" && ctx.Request.IsWebSocketRequest && _flexknob != null)
+        {
+            await HandleFlexKnobWebSocket(ctx, ct);
             return;
         }
 
@@ -349,7 +358,7 @@ public class ApiServer : IDisposable
     private object? Route(string path)
     {
         if (path == "/api/test") return new { ok = true, message = "API is working" };
-        if (path == "/api/health") return new { status = "ok", service = "HamDeck API (C#)", version = "3.0", port = _config.APIPort, rig_connected = _radio.Connected, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
+        if (path == "/api/health") return new { status = "ok", service = "HamDeck API (C#)", version = "3.1", port = _config.APIPort, rig_connected = _radio.Connected, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
 
         if (path == "/api/status")
         {
@@ -1059,6 +1068,108 @@ public class ApiServer : IDisposable
     {
         [JsonPropertyName("username")] public string? Username { get; set; }
         [JsonPropertyName("new_password")] public string? NewPassword { get; set; }
+    }
+
+    private async Task HandleFlexKnobWebSocket(HttpListenerContext ctx, CancellationToken ct)
+    {
+        HttpListenerWebSocketContext? wsCtx = null;
+        try
+        {
+            wsCtx = await ctx.AcceptWebSocketAsync(null);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("FLEXKNOB-WS", "WebSocket upgrade failed: {0}", ex.Message);
+            ctx.Response.StatusCode = 500;
+            ctx.Response.Close();
+            return;
+        }
+
+        var ws = wsCtx.WebSocket;
+        Logger.Info("FLEXKNOB-WS", "Browser client connected from {0}", ctx.Request.RemoteEndPoint);
+
+        var sendLock = new SemaphoreSlim(1, 1);
+
+        async Task SafeSend(object data)
+        {
+            if (ws.State != WebSocketState.Open) return;
+            var buf = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(data));
+            await sendLock.WaitAsync(ct);
+            try
+            {
+                if (ws.State == WebSocketState.Open)
+                    await ws.SendAsync(buf, WebSocketMessageType.Text, true, ct);
+            }
+            catch { }
+            finally { sendLock.Release(); }
+        }
+
+        Action<string> onMode   = mode   => _ = SafeSend(new { type = "mode",   mode, step = _flexknob!.StepDisplay });
+        Action<string> onAction = action => _ = SafeSend(new { type = "action", action });
+
+        _flexknob!.OnModeChanged += onMode;
+        _flexknob!.OnAction      += onAction;
+
+        await SafeSend(new
+        {
+            type         = "state",
+            mode         = _flexknob.ModeName,
+            step         = _flexknob.StepDisplay,
+            hw_connected = _flexknob.IsConnected
+        });
+
+        try
+        {
+            var buf = new byte[4096];
+            while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
+            {
+                WebSocketReceiveResult result;
+                try { result = await ws.ReceiveAsync(buf, ct); }
+                catch { break; }
+
+                if (result.MessageType == WebSocketMessageType.Close) break;
+                if (result.MessageType != WebSocketMessageType.Text) continue;
+
+                var text = Encoding.UTF8.GetString(buf, 0, result.Count);
+                try
+                {
+                    using var doc = JsonDocument.Parse(text);
+                    var msgType = doc.RootElement.TryGetProperty("type", out var t) ? t.GetString() : null;
+
+                    if (msgType == "flexknob")
+                    {
+                        var cmd = doc.RootElement.TryGetProperty("cmd", out var c) ? c.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(cmd))
+                        {
+                            Logger.Debug("FLEXKNOB-WS", "Inject: {0}", cmd);
+                            _flexknob.InjectCommand(cmd!);
+                        }
+                    }
+                    else if (msgType == "ping")
+                    {
+                        await SafeSend(new { type = "pong" });
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    Logger.Warn("FLEXKNOB-WS", "Bad JSON: {0}", ex.Message);
+                }
+            }
+        }
+        finally
+        {
+            _flexknob.OnModeChanged -= onMode;
+            _flexknob.OnAction      -= onAction;
+
+            try
+            {
+                if (ws.State == WebSocketState.Open)
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None);
+            }
+            catch { }
+
+            Logger.Info("FLEXKNOB-WS", "Browser client disconnected");
+        }
     }
 
     public void Dispose()

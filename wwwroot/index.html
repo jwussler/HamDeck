@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>HamDeck v3 — Rig Control</title>
+<title>HamDeck v3.1 — Rig Control</title>
 <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#2d8cf0">
@@ -22,7 +22,7 @@
 <header class="topbar">
     <div class="topbar-left">
         <div class="topbar-logo">HAM<span>DECK</span></div>
-        <span class="topbar-version">v3.0</span>
+        <span class="topbar-version">v3.1</span>
         <span><span id="conn-dot" class="conn-dot"></span><span id="conn-text" style="font-size:0.75rem;color:var(--text-dim)">—</span></span>
     </div>
     <div class="topbar-right">
@@ -274,6 +274,44 @@
         <div class="stats-row"><span class="stats-label">TX Count</span><span id="stat-tx" class="stats-val">—</span></div>
         <div class="stats-row"><span class="stats-label">TX Time</span><span id="stat-time" class="stats-val">—</span></div>
         <div class="stats-row"><span class="stats-label">QSY Count</span><span id="stat-qsy" class="stats-val">—</span></div>
+    </div>
+
+    <div class="card" style="grid-column: span 2;">
+        <div class="card-label">FLEXKNOB</div>
+        <div style="display:flex;align-items:center;gap:1.2rem;flex-wrap:wrap;">
+            <!-- Status -->
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span id="fk-dot" style="width:10px;height:10px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red);flex-shrink:0;display:inline-block;"></span>
+                <span id="fk-status" style="font-family:var(--mono);font-size:0.8rem;color:var(--text-dim);">Not connected</span>
+            </div>
+            <!-- Baud -->
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-family:var(--mono);font-size:0.7rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.08em;">Baud</span>
+                <select id="fk-baud" style="background:var(--bg-input);color:var(--text);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:0.2rem 0.4rem;font-family:var(--mono);font-size:0.8rem;">
+                    <option value="9600">9600</option>
+                    <option value="19200">19200</option>
+                    <option value="38400">38400</option>
+                    <option value="57600">57600</option>
+                    <option value="115200" selected>115200</option>
+                </select>
+            </div>
+            <!-- Buttons -->
+            <button id="fk-btn-connect" class="ctrl-btn" style="padding:0.35rem 0.9rem;">Connect</button>
+            <button id="fk-btn-disconnect" class="ctrl-btn" disabled style="padding:0.35rem 0.9rem;opacity:0.4;">Disconnect</button>
+            <!-- Mode / Step from server -->
+            <div style="display:flex;gap:0.6rem;margin-left:auto;">
+                <div style="background:var(--bg-input);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:0.25rem 0.6rem;min-width:70px;">
+                    <div style="font-family:var(--mono);font-size:0.62rem;font-weight:700;color:var(--accent);text-transform:uppercase;">Mode</div>
+                    <div id="fk-mode" style="font-family:var(--mono);font-size:0.9rem;font-weight:700;">—</div>
+                </div>
+                <div style="background:var(--bg-input);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:0.25rem 0.6rem;min-width:70px;">
+                    <div style="font-family:var(--mono);font-size:0.62rem;font-weight:700;color:var(--accent);text-transform:uppercase;">Step</div>
+                    <div id="fk-step" style="font-family:var(--mono);font-size:0.9rem;font-weight:700;">—</div>
+                </div>
+            </div>
+        </div>
+        <!-- Last action -->
+        <div id="fk-action" style="margin-top:0.6rem;font-family:var(--mono);font-size:0.8rem;color:var(--cyan);min-height:1.2rem;"></div>
     </div>
 
 </div>

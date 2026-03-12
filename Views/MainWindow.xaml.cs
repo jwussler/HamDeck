@@ -61,7 +61,7 @@ public partial class MainWindow : Window
 
         var logLevel = _config.LogLevel == "debug" ? Services.LogLevel.Debug : Services.LogLevel.Info;
         Logger.Init(logLevel, _config.LogToFile);
-        Logger.Info("MAIN", "HamDeck v3.0 (C#) starting");
+        Logger.Info("MAIN", "HamDeck v3.1 (C#) starting");
 
         foreach (var err in _config.Validate())
             Logger.Warn("CONFIG", err);
@@ -143,7 +143,7 @@ public partial class MainWindow : Window
                 _config.TxAudioDevice >= 0 ? _config.TxAudioDevice.ToString() : "auto-detect");
         }
 
-        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, streamer: _streamer, auth: auth, txAudio: _txAudio);
+        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, streamer: _streamer, auth: auth, txAudio: _txAudio, flexknob: _flexknob);
         if (_config.APIEnabled) _api.Start();
 
         // TCP CAT Proxy for N1MM and external loggers

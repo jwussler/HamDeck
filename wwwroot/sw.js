@@ -1,7 +1,7 @@
-// HamDeck v3.0.0 — Service Worker
-// Network-first for API/WS, cache-first for static assets
+// HamDeck v3.1 — Service Worker
+// Network-first for API/WS/JS/HTML, cache-first for icons/css
 
-const CACHE = 'hamdeck-v3.0.0';
+const CACHE = 'hamdeck-v3.1';
 
 const STATIC_ASSETS = [
     '/',
@@ -46,24 +46,26 @@ self.addEventListener('fetch', event => {
         url.pathname.startsWith('/ws')   ||
         url.origin !== self.location.origin
     ) {
-        return; // let the browser handle it normally
+        return;
     }
 
-    // Network-first with cache fallback for navigation requests
-    if (request.mode === 'navigate') {
+    // Network-first for JS and HTML — always fetch fresh, cache as offline fallback only
+    if (url.pathname.endsWith('.js') || request.mode === 'navigate') {
         event.respondWith(
             fetch(request)
                 .then(res => {
-                    const clone = res.clone();
-                    caches.open(CACHE).then(c => c.put(request, clone));
+                    if (res.ok) {
+                        const clone = res.clone();
+                        caches.open(CACHE).then(c => c.put(request, clone));
+                    }
                     return res;
                 })
-                .catch(() => caches.match('/index.html'))
+                .catch(() => caches.match(request).then(c => c || caches.match('/index.html')))
         );
         return;
     }
 
-    // Cache-first with network update for static assets
+    // Cache-first for icons, fonts, css — these change rarely
     event.respondWith(
         caches.match(request).then(cached => {
             const networkFetch = fetch(request).then(res => {
