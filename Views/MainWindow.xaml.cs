@@ -61,7 +61,7 @@ public partial class MainWindow : Window
 
         var logLevel = _config.LogLevel == "debug" ? Services.LogLevel.Debug : Services.LogLevel.Info;
         Logger.Init(logLevel, _config.LogToFile);
-        Logger.Info("MAIN", "HamDeck v3.1 (C#) starting");
+        Logger.Info("MAIN", "HamDeck v3.2 (C#) starting");
 
         foreach (var err in _config.Validate())
             Logger.Warn("CONFIG", err);

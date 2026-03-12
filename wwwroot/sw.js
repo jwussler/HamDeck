@@ -1,7 +1,7 @@
 // HamDeck v3.1 — Service Worker
 // Network-first for API/WS/JS/HTML, cache-first for icons/css
 
-const CACHE = 'hamdeck-v3.1';
+const CACHE = 'hamdeck-v3.2';
 
 const STATIC_ASSETS = [
     '/',
