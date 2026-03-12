@@ -152,10 +152,20 @@
             <button class="ctrl-btn" id="btn-ant2" data-ant="2" onclick="api('/api/ant/2')">ANT 2</button>
             <button class="ctrl-btn" id="btn-ant3" data-ant="3" onclick="api('/api/ant/3')">ANT 3</button>
         </div>
-        <div class="btn-grid btn-grid-3">
-            <button class="ctrl-btn" id="btn-rxant" onclick="api('/api/rxant/cycle')">RX ANT</button>
+        <div class="btn-grid btn-grid-2">
             <button class="ctrl-btn" onclick="api('/api/tune')">ATU</button>
             <button class="ctrl-btn" onclick="api('/api/tune/tgxl')">TG-XL</button>
+        </div>
+    </div>
+
+    <!-- RX ANTENNA (KMTronic) -->
+    <div class="card">
+        <div class="card-label">RX ANTENNA</div>
+        <div class="btn-grid btn-grid-4">
+            <button class="ctrl-btn" id="btn-rxant-1" onclick="setRxAnt(1)">ANT 1</button>
+            <button class="ctrl-btn" id="btn-rxant-2" onclick="setRxAnt(2)">ANT 2</button>
+            <button class="ctrl-btn" id="btn-rxant-3" onclick="setRxAnt(3)">ANT 3</button>
+            <button class="ctrl-btn" id="btn-rxant-4" onclick="setRxAnt(4)">ANT 4</button>
         </div>
     </div>
 

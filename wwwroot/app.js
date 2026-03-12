@@ -150,6 +150,20 @@ function setBoolActive(id, on, cls = 'active-green') {
     }
 }
 
+// ===== RX ANTENNA (KMTronic) =====
+
+function setRxAnt(n) {
+    api('/api/rxant/' + n).then(() => updateRxAnt(n));
+}
+
+function updateRxAnt(n) {
+    for (let i = 1; i <= 4; i++)
+        document.getElementById('btn-rxant-' + i)?.classList.remove('active');
+    document.getElementById('btn-rxant-' + n)?.classList.add('active');
+}
+
+window.setRxAnt = setRxAnt;
+
 // ===== POLL: STATUS =====
 
 let lastStatus = null;
@@ -242,7 +256,9 @@ async function pollToggles() {
     setBoolActive('btn-ant1', ant === 1, 'active');
     setBoolActive('btn-ant2', ant === 2, 'active');
     setBoolActive('btn-ant3', ant === 3, 'active');
-    setBoolActive('btn-rxant', data.rxant, 'active-green');
+
+    // KMTronic RX antenna
+    api('/api/rxant/get').then(d => { if (d?.rxant) updateRxAnt(d.rxant); });
 
     // Filters / toggles
     setBoolActive('btn-nb', data.nb, 'active-green');
