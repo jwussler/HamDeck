@@ -157,20 +157,20 @@ public class TgxlTuner
                         // Check if tuning completed
                         // GUARD: The TG-XL sends an initial burst of status messages
                         // (tuning=0, tuning=1, tuning=0) all within milliseconds of
-                        // connecting. Ignore the 1→0 transition until at least 2s have
-                        // elapsed — real tuning takes 3-15 seconds.
+                        // connecting. Ignore the 1->0 transition until at least 2s have
+                        // elapsed -- real tuning takes 3-15 seconds.
                         if (tuningValue == "0")
                         {
                             if (tuningSeen && elapsed >= 2.0)
                             {
-                                Logger.Info("TGXL", "*** COMPLETE - tuning went 1→0 (status #{0}, {1:F1}s) ***", pollCount, elapsed);
+                                Logger.Info("TGXL", "*** COMPLETE - tuning went 1->0 (status #{0}, {1:F1}s) ***", pollCount, elapsed);
                                 tuneComplete = true;
                                 break;
                             }
                             else if (tuningSeen && elapsed < 2.0)
                             {
-                                Logger.Debug("TGXL", "Ignoring early 1→0 at {0:F1}s (initial burst)", elapsed);
-                                tuningSeen = false; // Reset — wait for the real tuning=1
+                                Logger.Debug("TGXL", "Ignoring early 1->0 at {0:F1}s (initial burst)", elapsed);
+                                tuningSeen = false; // Reset -- wait for the real tuning=1
                             }
                             else if (elapsed > 5)
                             {
@@ -243,7 +243,17 @@ public class TgxlTuner
     }
 }
 
-/// <summary>Amplifier tune sequence - keys PTT in CW at low power for a duration</summary>
+/// <summary>
+/// Amplifier tune sequence — pure timed carrier, no external tuner involved:
+///   1 - Save current power and mode
+///   2 - Set 20W
+///   3 - Set CW mode
+///   4 - Key PTT for 10 seconds (gives the amp time to tune its internal network)
+///   5 - Drop PTT
+///   6 - Set 100W (target operating power — intentionally NOT restoring original)
+///   7 - Restore original mode
+/// Local-only: ApiServer blocks this endpoint for remote sessions.
+/// </summary>
 public class AmpTuner
 {
     private readonly RadioController _radio;
@@ -252,11 +262,14 @@ public class AmpTuner
 
     public bool IsActive { get; private set; }
 
-    public AmpTuner(RadioController radio) => _radio = radio;
+    public AmpTuner(RadioController radio, Config config)
+    {
+        _radio = radio;
+    }
 
     public void Stop() { lock (_lock) _stopFlag = true; }
 
-    public Dictionary<string, object> Tune(int seconds = 30, double powerPercent = 0.15)
+    public Dictionary<string, object> Tune()
     {
         if (IsActive)
         {
@@ -266,50 +279,68 @@ public class AmpTuner
             return new() { ["ok"] = true, ["action"] = "stopped", ["tuning"] = false };
         }
 
-        seconds = Math.Clamp(seconds, 1, 60);
-        int watts = Math.Clamp((int)(powerPercent * 100), 5, 100);
-
-        Task.Run(() => TuneWorker(seconds, watts));
-        return new() { ["ok"] = true, ["action"] = "started", ["tuning"] = true, ["duration"] = seconds, ["power"] = watts };
+        Logger.Info("AMP", "Tune() called - launching worker");
+        Task.Run(TuneWorker);
+        return new() { ["ok"] = true, ["action"] = "started", ["tuning"] = true,
+            ["note"] = "20W CW carrier for 10s -> 100W" };
     }
 
-    private void TuneWorker(int seconds, int tuneWatts)
+    private void TuneWorker()
     {
         lock (_lock) { IsActive = true; _stopFlag = false; }
 
         try
         {
-            Logger.Info("AMP", "Starting for {0}s at {1}W", seconds, tuneWatts);
+            Logger.Info("AMP", "=== AMP TUNE SEQUENCE START ===");
 
+            // Step 1: Save state
             int origPower = _radio.GetPower();
             string origMode = _radio.GetMode();
-            Logger.Info("AMP", "Saved - Power: {0}W, Mode: {1}", origPower, origMode);
+            Logger.Info("AMP", "Saved - Power: {0}W  Mode: {1}", origPower, origMode);
 
-            _radio.SetPower(tuneWatts); Thread.Sleep(200);
-            _radio.SetMode("CW"); Thread.Sleep(200);
+            // Step 2: Set 20W
+            Logger.Info("AMP", "Step 2 - Setting 20W");
+            _radio.SetPower(20);
+            Thread.Sleep(200);
+
+            // Step 3: Set CW mode
+            Logger.Info("AMP", "Step 3 - Setting CW mode");
+            _radio.SetMode("CW");
+            Thread.Sleep(200);
+
+            // Step 4: Key PTT for 10 seconds
+            Logger.Info("AMP", "Step 4 - PTT ON (10s carrier)");
             _radio.SetPTT(true);
-            Logger.Info("AMP", "PTT ON");
 
-            for (int i = 0; i < seconds * 10; i++)
+            for (int i = 0; i < 100; i++) // 100 x 100ms = 10 seconds
             {
-                if (_stopFlag) { Logger.Info("AMP", "Stopped early"); break; }
+                if (_stopFlag) { Logger.Info("AMP", "Stopped early at {0}s", i / 10.0); break; }
                 Thread.Sleep(100);
             }
 
-            _radio.SetPTT(false); Thread.Sleep(300);
-            Logger.Info("AMP", "PTT OFF");
+            // Step 5: Drop PTT
+            Logger.Info("AMP", "Step 5 - PTT OFF");
+            _radio.SetPTT(false);
+            Thread.Sleep(300);
 
-            _radio.SetPower(origPower); Thread.Sleep(200);
-            _radio.SetMode(origMode); Thread.Sleep(200);
+            // Step 6: Set 100W — target operating power
+            Logger.Info("AMP", "Step 6 - Setting 100W");
+            _radio.SetPower(100);
+            Thread.Sleep(200);
 
-            var verifyMode = _radio.GetMode();
-            var verifyPower = _radio.GetPower();
-            Logger.Info("AMP", "Complete - Verified: {0}W, {1}", verifyPower, verifyMode);
+            // Step 7: Restore original mode
+            Logger.Info("AMP", "Step 7 - Restoring mode to {0}", origMode);
+            _radio.SetMode(origMode);
+            Thread.Sleep(200);
+
+            Logger.Info("AMP", "=== AMP TUNE COMPLETE - Verified: {0}W, {1} ===",
+                _radio.GetPower(), _radio.GetMode());
         }
         catch (Exception ex)
         {
             Logger.Error("AMP", "Error: {0}", ex.Message);
             try { _radio.SetPTT(false); } catch { }
+            try { Logger.Warn("AMP", "Exception - forcing 100W for safety"); _radio.SetPower(100); } catch { }
         }
         finally
         {

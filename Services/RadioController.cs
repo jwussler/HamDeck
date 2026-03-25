@@ -171,6 +171,33 @@ public class RadioController : IDisposable
         }
     }
 
+
+    // Yaesu CAT query opcodes — a query expects a response; everything else is fire-and-forget.
+    // Using a HashSet gives O(1) lookup vs the original 50-branch OR chain.
+    private static readonly HashSet<string> _queryCommands = new(StringComparer.Ordinal)
+    {
+        "FA;", "FB;", "IF;",
+        "MD0;", "TX;", "PC;",
+        "ST;", "FT;", "VS;", "AG0;", "AG1;",
+        "RG0;", "SM0;", "SM1;",
+        "RM0;", "RM1;", "RM2;", "RM3;",
+        "RM4;", "RM5;", "RM6;", "RM7;",
+        "RM8;", "RM9;",
+        "PA0;", "RA0;", "GT0;",
+        "NB0;", "NR0;", "BC0;",
+        "RT;",  "XT;",  "RD;",
+        "VX;",  "PR;",  "PR0;", "PR1;", "LK;",
+        "KS;",  "KP;",  "BI;",
+        "AN0;", "AN1;", "SH0;",
+        "AC;",  "ID;",  "OI;",
+        "FN;",  "FR;",  "FS;",
+        "SQ0;", "SQ1;", "MG;",
+        "PS;",  "RS;",  "SC;",
+        "SD;",  "SY;",  "DA;",
+        "MC;",  "MS;",
+        "MO;"
+    };
+
     /// <summary>
     /// Public bridge used by TcpCatProxy to route raw CAT commands through the serial lock.
     /// Uses an explicit list of Yaesu query commands so set commands are always fire-and-forget.
@@ -186,26 +213,7 @@ public class RadioController : IDisposable
         // Yaesu query commands — everything else is a set (fire-and-forget)
         // Queries are the bare opcode + semicolon (no payload digits)
         var upper = cmd.ToUpper();
-        bool isQuery =
-            upper == "FA;" || upper == "FB;" || upper == "IF;" ||
-            upper == "MD0;" || upper == "TX;" || upper == "PC;" ||
-            upper == "ST;" || upper == "FT;" || upper == "VS;" || upper == "AG0;" || upper == "AG1;" ||
-            upper == "RG0;" || upper == "SM0;" || upper == "SM1;" ||
-            upper == "RM0;" || upper == "RM1;" || upper == "RM2;" || upper == "RM3;" ||
-            upper == "RM4;" || upper == "RM5;" || upper == "RM6;" || upper == "RM7;" ||
-            upper == "RM8;" || upper == "RM9;" ||
-            upper == "PA0;" || upper == "RA0;" || upper == "GT0;" ||
-            upper == "NB0;" || upper == "NR0;" || upper == "BC0;" ||
-            upper == "RT;"  || upper == "XT;" || upper == "RD;"  ||
-            upper == "VX;"  || upper == "PR;" || upper == "PR0;" || upper == "PR1;" || upper == "LK;"  ||
-            upper == "KS;"  || upper == "KP;" || upper == "BI;"  ||
-            upper == "AN0;" || upper == "AN1;" || upper == "SH0;" ||
-            upper == "AC;"  || upper == "ID;" || upper == "OI;" ||
-            upper == "FN;"  || upper == "FR;" || upper == "FS;" ||
-            upper == "SQ0;" || upper == "SQ1;" || upper == "MG;" ||
-            upper == "PS;"  || upper == "RS;" || upper == "SC;" ||
-            upper == "SD;"  || upper == "SY;" || upper == "DA;" ||
-            upper == "MC;"  || upper == "MS;";
+        bool isQuery = _queryCommands.Contains(upper);
 
         // Mark proxy activity so the UI switches to cached-value mode
         LastProxyActivityMs = Environment.TickCount64;
@@ -565,6 +573,44 @@ public class RadioController : IDisposable
         return resp.StartsWith("PR0") && resp.Length >= 4 && resp[3] == '2';
     }
     public void SetComp(bool on) => Send(on ? "PR02;" : "PR01;", false);
+
+    // ========== MONITOR ==========
+    // CAT manual: ML P1 P2 P2 P2 ;
+    //   P1=0: ON/OFF — P2: 000=OFF, 001=ON
+    //   P1=1: Level  — P2: 000-100
+    // Read: ML0; → ML0PPP;   ML1; → ML1PPP;
+
+    private int _savedMonLevel = 50;
+
+    /// <summary>Get monitor state via ML0; query</summary>
+    public bool GetMon()
+    {
+        var resp = Send("ML0;");
+        // Response: ML0PPP; — 000=off, 001=on
+        if (resp.StartsWith("ML0") && resp.Length >= 6 &&
+            int.TryParse(resp[3..6], out var state))
+            return state > 0;
+        return false;
+    }
+
+    /// <summary>Set monitor on or off — off kills TX audio feedback loop when remote</summary>
+    public void SetMon(bool on)
+    {
+        if (!on)
+        {
+            // Save current level before turning off so we can restore it
+            var resp = Send("ML1;");
+            if (resp.StartsWith("ML1") && resp.Length >= 6 &&
+                int.TryParse(resp[3..6], out var level) && level > 0)
+                _savedMonLevel = level;
+            Send("ML0000;", false);               // P1=0, P2=000 → MONI OFF
+        }
+        else
+        {
+            Send("ML0001;", false);               // P1=0, P2=001 → MONI ON
+            Send($"ML1{_savedMonLevel:D3};", false); // P1=1 → restore saved level
+        }
+    }
 
     // ========== RIT / XIT ==========
 

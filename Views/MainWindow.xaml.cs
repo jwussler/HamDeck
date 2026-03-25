@@ -73,7 +73,7 @@ public partial class MainWindow : Window
         _radio = new RadioController();
         _recorder = new AudioRecorder(_radio, _config);
         _tgxl = new TgxlTuner(_radio, _config);
-        _amp = new AmpTuner(_radio);
+        _amp = new AmpTuner(_radio, _config);
         _kmtronic = _config.KmtronicEnabled
             ? new KmtronicService(_config.KmtronicHost, _config.KmtronicPort)
             : null;

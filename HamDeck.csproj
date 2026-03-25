@@ -27,7 +27,23 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- wwwroot is marked PreserveNewest so full rebuilds copy it automatically.
+         The AfterBuild target below handles incremental builds (F5/Run) so you
+         never need to manually xcopy after editing a static file. -->
     <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!-- Sync wwwroot to bin output after every build (handles F5 / incremental builds) -->
+  <Target Name="SyncWwwroot" AfterTargets="Build">
+    <ItemGroup>
+      <WwwrootFiles Include="$(MSBuildProjectDirectory)\wwwroot\**\*" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(WwwrootFiles)"
+      DestinationFiles="@(WwwrootFiles->'$(OutputPath)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true"
+      OverwriteReadOnlyFiles="true" />
+    <Message Text="HamDeck: wwwroot synced to $(OutputPath)wwwroot\" Importance="normal" />
+  </Target>
 
 </Project>

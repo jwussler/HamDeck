@@ -96,6 +96,17 @@ public class Config
     // Voice Keyer
     [JsonPropertyName("voicekeyer_enabled")] public bool VoiceKeyerEnabled { get; set; }
 
+    // Frequency presets (user-configurable, used by /api/preset/{name})
+    [JsonPropertyName("frequency_presets")] public List<FrequencyPreset> FrequencyPresets { get; set; } = new();
+
+    public class FrequencyPreset
+    {
+        [JsonPropertyName("name")]    public string Name   { get; set; } = "";
+        [JsonPropertyName("freq_hz")] public long   FreqHz { get; set; }
+        [JsonPropertyName("mode")]    public string Mode   { get; set; } = "";
+    }
+
+
     // Logging
     [JsonPropertyName("log_level")] public string LogLevel { get; set; } = "info";
     [JsonPropertyName("log_to_file")] public bool LogToFile { get; set; }
@@ -171,6 +182,17 @@ public class Config
         if (string.IsNullOrEmpty(ClusterAPIURL)) ClusterAPIURL = "https://api.wa0o.com/dxcache/spots";
         if (string.IsNullOrEmpty(RecordPath)) RecordPath = DefaultRecordPath;
         if (string.IsNullOrEmpty(PTTRecordPath)) PTTRecordPath = DefaultPTTRecordPath;
+        if (FrequencyPresets.Count == 0)
+            FrequencyPresets =
+            [
+                new() { Name = "40cw",  FreqHz = 7_030_000,  Mode = "CW"  },
+                new() { Name = "40ssb", FreqHz = 7_200_000,  Mode = "LSB" },
+                new() { Name = "20cw",  FreqHz = 14_030_000, Mode = "CW"  },
+                new() { Name = "20ssb", FreqHz = 14_200_000, Mode = "USB" },
+                new() { Name = "15cw",  FreqHz = 21_030_000, Mode = "CW"  },
+                new() { Name = "15ssb", FreqHz = 21_300_000, Mode = "USB" },
+                new() { Name = "10ssb", FreqHz = 28_400_000, Mode = "USB" },
+            ];
     }
 
     /// <summary>Validate configuration and return list of issues</summary>
