@@ -92,7 +92,7 @@ public class ApiServer : IDisposable
     {
         // Info
         ["/api/test"]   = _ => new { ok = true, message = "API is working" },
-        ["/api/health"] = _ => new { status = "ok", service = "HamDeck API (C#)", version = "3.3",
+        ["/api/health"] = _ => new { status = "ok", service = "HamDeck API (C#)", version = "3.4",
                                      port = _config.APIPort, rig_connected = _radio.Connected,
                                      amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive,
                                      freq_buffer = _freqBuffer },
