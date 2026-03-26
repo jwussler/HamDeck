@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -304,7 +304,7 @@ public class ApiServer : IDisposable
 
     private object? Route(string path, bool isLocal)
     {
-        // Software VFO lock — block frequency-changing routes
+        // Software VFO lock â€” block frequency-changing routes
         if (_config.VfoLocked)
         {
             if (VfoLockExactBlocked.Contains(path) ||
@@ -510,7 +510,7 @@ public class ApiServer : IDisposable
         if (Directory.Exists(_wwwroot))
             Logger.Info("API", "Web dashboard available at http://localhost:{0}/", dashPort);
         else
-            Logger.Warn("API", "wwwroot folder not found at {0} — web dashboard disabled", _wwwroot);
+            Logger.Warn("API", "wwwroot folder not found at {0} â€” web dashboard disabled", _wwwroot);
     }
 
     private async Task ListenLoop(HttpListener listener, bool readOnly, CancellationToken ct)
@@ -547,7 +547,7 @@ public class ApiServer : IDisposable
             var token = GetSessionToken(ctx);
             if (_auth != null && (!_auth.ValidateSession(token) || !_auth.CanTransmit(token)))
             {
-                Logger.Warn("API", "TX audio WebSocket rejected — not authenticated or TX not permitted");
+                Logger.Warn("API", "TX audio WebSocket rejected â€” not authenticated or TX not permitted");
                 try { var wsCtx = await ctx.AcceptWebSocketAsync(null); await wsCtx.WebSocket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Authentication required or transmit not permitted", CancellationToken.None); }
                 catch { resp.StatusCode = 401; resp.Close(); }
                 return;
@@ -594,7 +594,7 @@ public class ApiServer : IDisposable
             if (readOnly && (trimmed == "/api/ptt/on" || trimmed == "/api/ptt/off" || trimmed == "/api/ptt/key" || trimmed == "/api/ptt/unkey" || trimmed == "/api/ptt/toggle"))
             {
                 var token = GetSessionToken(ctx);
-                if (_auth != null && !_auth.CanTransmit(token)) { resp.StatusCode = 403; WriteJson(resp, new { status = "error", message = "Transmit not permitted for this account" }); return; }
+                if (_auth != null && _auth.ValidateSession(token) && !_auth.CanTransmit(token)) { resp.StatusCode = 403; WriteJson(resp, new { status = "error", message = "Transmit not permitted for this account" }); return; }
             }
 
             if (readOnly && !ReadOnlyRoutes.Contains(trimmed))
@@ -818,9 +818,9 @@ public class ApiServer : IDisposable
         }
 
         // FlexKnob button mappings
-        // GET  /api/admin/flexknob/buttons        — return current map
-        // POST /api/admin/flexknob/buttons        — replace entire map { "b1s": "ptt_toggle", ... }
-        // POST /api/admin/flexknob/buttons/reset  — restore defaults
+        // GET  /api/admin/flexknob/buttons        â€” return current map
+        // POST /api/admin/flexknob/buttons        â€” replace entire map { "b1s": "ptt_toggle", ... }
+        // POST /api/admin/flexknob/buttons/reset  â€” restore defaults
         if (path == "/api/admin/flexknob/buttons")
         {
             if (ctx.Request.HttpMethod == "POST")
@@ -930,3 +930,4 @@ public class ApiServer : IDisposable
         _listener = null; _dashboardListener = null;
     }
 }
+
