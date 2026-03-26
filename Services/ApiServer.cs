@@ -326,14 +326,26 @@ public class ApiServer : IDisposable
     //  ROUTE HELPERS
     // =========================================================================
 
+    private const long StatusCacheMaxAgeMs = 1500;
+
     private object? BuildApiStatus()
     {
         if (!_radio.Connected)
             return new { connected = false, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
+
+        var cacheAgeMs = Environment.TickCount64 - _radio.LastCacheRefreshMs;
+        if (cacheAgeMs <= StatusCacheMaxAgeMs && _radio.LastFrequency > 0)
+        {
+            return new { connected = true, freq = _radio.LastFrequency, mode = _radio.LastMode, vfo = _radio.LastVFO,
+                         power = _radio.LastPower, tx = _radio.LastTXState, split = _radio.LastSplit,
+                         amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer,
+                         vfo_locked = _config.VfoLocked, cache_age_ms = cacheAgeMs };
+        }
+        Logger.Debug("API", "Status cache stale ({0}ms) - live query", cacheAgeMs);
         return new { connected = true, freq = _radio.GetFreq(), mode = _radio.GetMode(), vfo = _radio.GetVFO(),
                      power = _radio.GetPower(), tx = _radio.GetTXStatus(), split = _radio.GetSplit(),
                      amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer,
-                     vfo_locked = _config.VfoLocked };
+                     vfo_locked = _config.VfoLocked, cache_age_ms = (long)0 };
     }
 
     private object? BuildApiStatusFull()

@@ -36,6 +36,12 @@ public class RadioController : IDisposable
     /// <summary>True when a proxy client has been active within the last 500ms</summary>
     public bool ProxyIsActive => Environment.TickCount64 - LastProxyActivityMs < 500;
 
+    /// <summary>
+    /// Timestamp of last successful GetFreq() — set by WPF UpdateTick every 200ms.
+    /// ApiServer uses this to serve cached status without serial queries on web polls.
+    /// </summary>
+    public long LastCacheRefreshMs { get; private set; }
+
     // ========== CONNECTION ==========
 
     public void Connect(string portName, int baud)
@@ -309,6 +315,7 @@ public class RadioController : IDisposable
         {
             _failCount = 0;
             LastFrequency = freq;
+            LastCacheRefreshMs = Environment.TickCount64;
             if (!Connected) { Connected = true; Logger.Info("RADIO", "Reconnected"); }
             return freq;
         }
