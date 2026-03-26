@@ -1,11 +1,13 @@
-// HamDeck v3.1 — Service Worker
+// HamDeck v3.4 — Service Worker
 // Network-first for API/WS/JS/HTML, cache-first for icons/css
 
-const CACHE = 'hamdeck-v3.3';
+const CACHE = 'hamdeck-v3.4';
 
 const STATIC_ASSETS = [
     '/',
     '/index.html',
+    '/ptt.js',
+    '/audio.js',
     '/app.js',
     '/style.css',
     '/login.html',
@@ -40,11 +42,12 @@ self.addEventListener('fetch', event => {
     const { request } = event;
     const url = new URL(request.url);
 
-    // Always bypass: API calls, WebSockets, cross-origin
+    // Always bypass: API calls, WebSockets, cross-origin, non-GET
     if (
         url.pathname.startsWith('/api/') ||
         url.pathname.startsWith('/ws')   ||
-        url.origin !== self.location.origin
+        url.origin !== self.location.origin ||
+        request.method !== 'GET'
     ) {
         return;
     }

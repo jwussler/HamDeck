@@ -17,18 +17,23 @@ function setRxVolume(val) {
     if (label) label.textContent = val + 'x';
 }
 
-// Radio SSB OUT LEVEL slider — loads current value from radio on page load
+// Radio SSB OUT LEVEL slider — loads current value from radio on page load.
+// Defers the API call until window.api is defined (app.js runs after audio.js).
 (function initRadioVolSlider() {
     const slider = document.getElementById('rx-radio-vol');
     const label  = document.getElementById('rx-radio-label');
     if (!slider) return;
 
-    window.api('/api/ssb-out-level/get').then(data => {
-        if (data && data.status === 'ok') {
-            slider.value = data.level;
-            if (label) label.textContent = data.level;
-        }
-    });
+    const tryLoad = () => {
+        if (!window.api) { setTimeout(tryLoad, 100); return; }
+        window.api('/api/ssb-out-level/get').then(data => {
+            if (data && data.status === 'ok') {
+                slider.value = data.level;
+                if (label) label.textContent = data.level;
+            }
+        });
+    };
+    tryLoad();
 
     let debounce = null;
     slider.addEventListener('input', () => {

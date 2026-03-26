@@ -21,6 +21,21 @@ public class Config
     [JsonPropertyName("flexknob_enabled")] public bool FlexknobEnabled { get; set; } = true;
     [JsonPropertyName("flexknob_default_step")] public int FlexknobDefaultStep { get; set; } = 100;
 
+    // FlexKnob button mappings — key: "b1s","b1l","b2s","b2l","b3s","b3l","b4s","b4l"
+    // Values: none | ptt_toggle | vfo_swap | cycle_mode | cycle_step | reset_step |
+    //         rit_clear | split_toggle | nb_toggle | nr_toggle | att_toggle | notch_toggle
+    [JsonPropertyName("flexknob_buttons")] public Dictionary<string, string> FlexknobButtons { get; set; } = new()
+    {
+        ["b1s"] = "cycle_mode",
+        ["b1l"] = "vfo_swap",
+        ["b2s"] = "cycle_step",
+        ["b2l"] = "reset_step",
+        ["b3s"] = "vfo_swap",
+        ["b3l"] = "ptt_toggle",
+        ["b4s"] = "ptt_toggle",
+        ["b4l"] = "none",
+    };
+
     // Audio/Recording settings
     [JsonPropertyName("audio_device")] public int AudioDevice { get; set; } = -1;
     [JsonPropertyName("mic_device")] public int MicDevice { get; set; } = -1;
@@ -80,6 +95,10 @@ public class Config
     [JsonPropertyName("wavelog_api_key")] public string WavelogAPIKey { get; set; } = "";
     [JsonPropertyName("wavelog_station_id")] public int WavelogStationID { get; set; } = 1;
     [JsonPropertyName("wavelog_enabled")] public bool WavelogEnabled { get; set; }
+
+    // Software VFO lock — blocks CAT frequency changes from web/Stream Deck
+    // (does not affect front panel knob; use LK1; for that)
+    [JsonPropertyName("vfo_locked")] public bool VfoLocked { get; set; } = false;
 
     // Window behavior
     [JsonPropertyName("start_minimized")] public bool StartMinimized { get; set; }

@@ -208,6 +208,9 @@ async function pollStatus() {
     setBoolActive('btn-vfo-b', data.vfo === 'B', 'active');
     setBoolActive('btn-split', data.split, 'active-amber');
 
+    // Software VFO lock
+    updateVfoLockBtn(data.vfo_locked ?? false);
+
     const pttBtn = document.getElementById('btn-ptt');
     if (pttBtn) pttBtn.classList.toggle('active', data.tx === true);
 
@@ -256,6 +259,11 @@ async function pollToggles() {
     dom.ritOff.textContent = (ritHz >= 0 ? '+' : '') + ritHz + ' Hz';
 
     setBoolActive('btn-xit', data.xit, 'active');
+
+    // Hardware VFO lock (front panel CAT lock)
+    setBoolActive('btn-hw-lock', data.lock, 'active-amber');
+    const hwBtn = document.getElementById('btn-hw-lock');
+    if (hwBtn) hwBtn.textContent = data.lock ? '🔒 HW LOCK' : '🔓 HW LOCK';
 }
 
 // ===== POLL: METERS =====
@@ -393,6 +401,33 @@ document.getElementById('freq-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter')  submitFreq();
     if (e.key === 'Escape') { e.target.value = ''; e.target.blur(); }
 });
+
+// ===== VFO LOCK =====
+
+async function toggleVfoLock() {
+    const data = await api('/api/vfo-lock/toggle');
+    if (data) updateVfoLockBtn(data.vfo_locked);
+}
+
+async function toggleHwLock() {
+    const data = await api('/api/status/full');
+    if (!data) return;
+    // current lock state comes from pollToggles, use the button class to determine current state
+    const btn = document.getElementById('btn-hw-lock');
+    const isLocked = btn && btn.classList.contains('active-amber');
+    await api(isLocked ? '/api/lock/off' : '/api/lock/on');
+    setBoolActive('btn-hw-lock', !isLocked, 'active-amber');
+}
+
+function updateVfoLockBtn(locked) {
+    const btn = document.getElementById('btn-vfo-lock');
+    if (!btn) return;
+    btn.textContent = locked ? '🔒 WEB LOCK' : '🔓 WEB LOCK';
+    setBoolActive('btn-vfo-lock', locked, 'active-red');
+}
+
+window.toggleVfoLock = toggleVfoLock;
+window.toggleHwLock  = toggleHwLock;
 
 // ===== BAND / MODE / POWER CLICK HANDLERS =====
 

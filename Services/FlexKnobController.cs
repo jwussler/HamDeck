@@ -363,6 +363,10 @@ public class FlexKnobController : IDisposable
         if (steps == 0) return;
         Interlocked.Exchange(ref _lastActivityMs, Environment.TickCount64);
 
+        // Respect software VFO lock — frequency rotation blocked, others pass through
+        if (_config.VfoLocked && Mode == KnobMode.Frequency)
+        { OnAction?.Invoke("VFO LOCKED"); return; }
+
         switch (Mode)
         {
             case KnobMode.Frequency: HandleFrequencyRotation(steps); break;
@@ -453,28 +457,75 @@ public class FlexKnobController : IDisposable
     private void HandleButton(int button, bool longPress)
     {
         Logger.Info("FLEXKNOB", "Button {0} {1}", button, longPress ? "LONG" : "short");
+        var key = $"b{button}{(longPress ? "l" : "s")}";
+        var action = _config.FlexknobButtons.TryGetValue(key, out var a) ? a : "none";
+        DispatchButtonAction(action);
+    }
 
-        if (longPress)
+    private void DispatchButtonAction(string action)
+    {
+        switch (action)
         {
-            switch (button)
-            {
-                case 1: if (_radio.Connected) { _radio.SwapVFO(); OnAction?.Invoke("VFO SWAP"); } break;
-                case 2: SetStep(100); OnAction?.Invoke("STEP RST"); OnModeChanged?.Invoke(ModeName); break;
-                case 3: if (_radio.Connected) { var tx = _radio.GetTXStatus(); _radio.SetPTT(!tx); OnAction?.Invoke(tx ? "PTT OFF" : "PTT ON"); } break;
-            }
-        }
-        else
-        {
-            switch (button)
-            {
-                case 1: CycleMode(); break;
-                case 2:
-                    if (Mode == KnobMode.Frequency) CycleStep();
-                    else if (Mode == KnobMode.RIT) { _radio.ClearRIT(); OnAction?.Invoke("RIT CLR"); }
-                    break;
-                case 3: if (_radio.Connected) { _radio.SwapVFO(); OnAction?.Invoke("VFO SWAP"); } break;
-                case 4: if (_radio.Connected) { var tx = _radio.GetTXStatus(); _radio.SetPTT(!tx); OnAction?.Invoke(tx ? "PTT OFF" : "PTT ON"); } break;
-            }
+            case "ptt_toggle":
+                if (!_radio.Connected) return;
+                var tx = _radio.GetTXStatus();
+                _radio.SetPTT(!tx);
+                OnAction?.Invoke(tx ? "PTT OFF" : "PTT ON");
+                break;
+            case "vfo_swap":
+                if (!_radio.Connected) return;
+                _radio.SwapVFO();
+                OnAction?.Invoke("VFO SWAP");
+                break;
+            case "cycle_mode":
+                CycleMode();
+                break;
+            case "cycle_step":
+                if (Mode == KnobMode.Frequency) CycleStep();
+                else if (Mode == KnobMode.RIT) { _radio.ClearRIT(); OnAction?.Invoke("RIT CLR"); }
+                break;
+            case "reset_step":
+                SetStep(100);
+                OnAction?.Invoke("STEP RST");
+                OnModeChanged?.Invoke(ModeName);
+                break;
+            case "rit_clear":
+                _radio.ClearRIT();
+                OnAction?.Invoke("RIT CLR");
+                break;
+            case "split_toggle":
+                if (!_radio.Connected) return;
+                var split = _radio.GetSplit();
+                _radio.SetSplit(!split);
+                OnAction?.Invoke(split ? "SPLIT OFF" : "SPLIT ON");
+                break;
+            case "nb_toggle":
+                if (!_radio.Connected) return;
+                var nb = _radio.GetNB();
+                _radio.SetNB(!nb);
+                OnAction?.Invoke(nb ? "NB OFF" : "NB ON");
+                break;
+            case "nr_toggle":
+                if (!_radio.Connected) return;
+                var nr = _radio.GetNR();
+                _radio.SetNR(!nr);
+                OnAction?.Invoke(nr ? "NR OFF" : "NR ON");
+                break;
+            case "att_toggle":
+                if (!_radio.Connected) return;
+                var att = _radio.GetATT();
+                _radio.SetATT(!att);
+                OnAction?.Invoke(att ? "ATT OFF" : "ATT ON");
+                break;
+            case "notch_toggle":
+                if (!_radio.Connected) return;
+                var notch = _radio.GetNotch();
+                _radio.SetNotch(!notch);
+                OnAction?.Invoke(notch ? "NOTCH OFF" : "NOTCH ON");
+                break;
+            case "none":
+            default:
+                break;
         }
     }
 

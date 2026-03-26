@@ -60,7 +60,7 @@ public class ApiServer : IDisposable
         "/api/status", "/api/status/full", "/api/health", "/api/meters",
         "/api/session", "/api/cluster/spots", "/api/record/status",
         "/api/freq", "/api/freq/get", "/api/volume/get", "/api/cw-speed/get",
-        "/api/ant/get", "/api/ant/rx/get", "/api/auth/status", "/api/power/limit",
+        "/api/ant/get", "/api/ant/rx/get", "/api/auth/status", "/api/power/limit", "/api/vfo-lock/status",
     };
 
     private readonly Dictionary<string, Func<bool, object?>> _exactRoutes;
@@ -92,7 +92,7 @@ public class ApiServer : IDisposable
     {
         // Info
         ["/api/test"]   = _ => new { ok = true, message = "API is working" },
-        ["/api/health"] = _ => new { status = "ok", service = "HamDeck API (C#)", version = "3.4",
+        ["/api/health"] = _ => new { status = "ok", service = "HamDeck API (C#)", version = "3.3",
                                      port = _config.APIPort, rig_connected = _radio.Connected,
                                      amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive,
                                      freq_buffer = _freqBuffer },
@@ -265,6 +265,12 @@ public class ApiServer : IDisposable
 
         // SSB out level
         ["/api/ssb-out-level/get"] = _ => new { status = "ok", level = _radio.GetSSBOutLevel() },
+
+        // Software VFO lock
+        ["/api/vfo-lock/on"]     = _ => { _config.VfoLocked = true;  _config.Save(); return new { status = "ok", vfo_locked = true  }; },
+        ["/api/vfo-lock/off"]    = _ => { _config.VfoLocked = false; _config.Save(); return new { status = "ok", vfo_locked = false }; },
+        ["/api/vfo-lock/toggle"] = _ => { _config.VfoLocked = !_config.VfoLocked; _config.Save(); return new { status = "ok", vfo_locked = _config.VfoLocked }; },
+        ["/api/vfo-lock/status"] = _ => new { status = "ok", vfo_locked = _config.VfoLocked },
     };
 
     private (string Prefix, Func<string, bool, object?> Handler)[] BuildPrefixRoutes() =>
@@ -285,8 +291,27 @@ public class ApiServer : IDisposable
         ("/api/ssb-out-level/set/", (s, _)     => { if (int.TryParse(s, out var lv)) { _radio.SetSSBOutLevel(lv); return OK("ssb_out_level", lv); } return null; }),
     ];
 
+    private static readonly HashSet<string> VfoLockExactBlocked = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/api/freq/send", "/api/freq/clear", "/api/freq/backspace",
+        "/api/vfo/swap", "/api/quick-split",
+    };
+
+    private static readonly string[] VfoLockPrefixBlocked =
+    [
+        "/api/freq/set/", "/api/freq/digit/", "/api/band/", "/api/preset/", "/api/step/",
+    ];
+
     private object? Route(string path, bool isLocal)
     {
+        // Software VFO lock — block frequency-changing routes
+        if (_config.VfoLocked)
+        {
+            if (VfoLockExactBlocked.Contains(path) ||
+                VfoLockPrefixBlocked.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                return new { status = "error", message = "VFO is locked", vfo_locked = true };
+        }
+
         if (_exactRoutes.TryGetValue(path, out var handler))
             return handler(isLocal);
 
@@ -307,7 +332,8 @@ public class ApiServer : IDisposable
             return new { connected = false, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
         return new { connected = true, freq = _radio.GetFreq(), mode = _radio.GetMode(), vfo = _radio.GetVFO(),
                      power = _radio.GetPower(), tx = _radio.GetTXStatus(), split = _radio.GetSplit(),
-                     amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
+                     amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer,
+                     vfo_locked = _config.VfoLocked };
     }
 
     private object? BuildApiStatusFull()
@@ -789,6 +815,41 @@ public class ApiServer : IDisposable
             var removed = _config.FrequencyPresets.RemoveAll(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
             if (removed > 0) { _config.Save(); return new { status = "ok", message = $"Preset '{name}' removed" }; }
             return new { status = "error", message = $"Preset '{name}' not found" };
+        }
+
+        // FlexKnob button mappings
+        // GET  /api/admin/flexknob/buttons        — return current map
+        // POST /api/admin/flexknob/buttons        — replace entire map { "b1s": "ptt_toggle", ... }
+        // POST /api/admin/flexknob/buttons/reset  — restore defaults
+        if (path == "/api/admin/flexknob/buttons")
+        {
+            if (ctx.Request.HttpMethod == "POST")
+            {
+                using var reader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8);
+                var body = await reader.ReadToEndAsync();
+                var map = JsonSerializer.Deserialize<Dictionary<string, string>>(body);
+                if (map == null) return new { status = "error", message = "Invalid JSON" };
+                // Only accept known keys
+                var valid = new HashSet<string> { "b1s","b1l","b2s","b2l","b3s","b3l","b4s","b4l" };
+                foreach (var kv in map)
+                    if (valid.Contains(kv.Key)) _config.FlexknobButtons[kv.Key] = kv.Value;
+                _config.Save();
+                return new { status = "ok", buttons = _config.FlexknobButtons };
+            }
+            return new { status = "ok", buttons = _config.FlexknobButtons };
+        }
+
+        if (path == "/api/admin/flexknob/buttons/reset")
+        {
+            _config.FlexknobButtons = new Dictionary<string, string>
+            {
+                ["b1s"] = "cycle_mode",  ["b1l"] = "vfo_swap",
+                ["b2s"] = "cycle_step",  ["b2l"] = "reset_step",
+                ["b3s"] = "vfo_swap",    ["b3l"] = "ptt_toggle",
+                ["b4s"] = "ptt_toggle",  ["b4l"] = "none",
+            };
+            _config.Save();
+            return new { status = "ok", message = "Button map reset to defaults", buttons = _config.FlexknobButtons };
         }
 
         return null;

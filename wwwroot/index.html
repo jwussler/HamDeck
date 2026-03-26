@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>HamDeck v3.4 — Rig Control</title>
+<title>HamDeck v3.3 — Rig Control</title>
 <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#2d8cf0">
@@ -22,7 +22,7 @@
 <header class="topbar">
     <div class="topbar-left">
         <div class="topbar-logo">HAM<span>DECK</span></div>
-        <span class="topbar-version">v3.4</span>
+        <span class="topbar-version">v3.3</span>
         <span><span id="conn-dot" class="conn-dot"></span><span id="conn-text" style="font-size:0.75rem;color:var(--text-dim)">—</span></span>
     </div>
     <div class="topbar-right">
@@ -112,6 +112,10 @@
             <button class="ctrl-btn" onclick="api('/api/vfo-copy/a2b')">A→B</button>
             <button class="ctrl-btn" onclick="api('/api/vfo-copy/b2a')">B→A</button>
             <button class="ctrl-btn" id="btn-split" onclick="api('/api/split/toggle')">SPLIT</button>
+        </div>
+        <div class="btn-grid btn-grid-2" style="margin-top:6px">
+            <button class="ctrl-btn" id="btn-vfo-lock" onclick="toggleVfoLock()" title="Software lock — blocks web/API/knob freq changes">🔒 WEB LOCK</button>
+            <button class="ctrl-btn" id="btn-hw-lock" onclick="toggleHwLock()" title="Hardware lock — locks front panel VFO knob via CAT">🔒 HW LOCK</button>
         </div>
     </div>
 
@@ -327,6 +331,8 @@
 
 </div>
 
+<script src="ptt.js"></script>
+<script src="audio.js"></script>
 <script src="app.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
