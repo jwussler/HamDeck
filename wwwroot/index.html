@@ -194,6 +194,32 @@
         </div>
     </div>
 
+    <!-- KEYER -->
+    <div class="card">
+        <div class="card-label">KEYER</div>
+        <div class="btn-grid btn-grid-5">
+            <button class="ctrl-btn" onclick="api('/api/cw/memory/1')">CW 1</button>
+            <button class="ctrl-btn" onclick="api('/api/cw/memory/2')">CW 2</button>
+            <button class="ctrl-btn" onclick="api('/api/cw/memory/3')">CW 3</button>
+            <button class="ctrl-btn" onclick="api('/api/cw/memory/4')">CW 4</button>
+            <button class="ctrl-btn" onclick="api('/api/cw/memory/5')">CW 5</button>
+        </div>
+        <div class="slider-row" style="margin-top:6px">
+            <input id="cw-text" type="text" maxlength="50" placeholder="CW text..."
+                   style="flex:1;background:var(--bg-input);color:#fff;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:0.3rem 0.5rem;font-family:var(--mono);">
+            <button class="ctrl-btn" onclick="sendCw()">SEND</button>
+        </div>
+        <div class="btn-grid btn-grid-5" style="margin-top:6px">
+            <button class="ctrl-btn" onclick="api('/api/voice/play/1')">V1</button>
+            <button class="ctrl-btn" onclick="api('/api/voice/play/2')">V2</button>
+            <button class="ctrl-btn" onclick="api('/api/voice/play/3')">V3</button>
+            <button class="ctrl-btn" onclick="api('/api/voice/play/4')">V4</button>
+            <button class="ctrl-btn" onclick="api('/api/voice/play/5')">V5</button>
+        </div>
+        <button class="ctrl-btn" style="width:100%;margin-top:6px"
+                onclick="api('/api/cw/stop'); api('/api/voice/stop')">STOP KEYER</button>
+    </div>
+
     <!-- RIT / XIT -->
     <div class="card">
         <div class="card-label">RIT / XIT</div>

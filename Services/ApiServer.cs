@@ -35,6 +35,8 @@ public class ApiServer : IDisposable
     private readonly AudioStreamer? _streamer;
     private readonly AudioTransmitter? _txAudio;
     private readonly FlexKnobController? _flexknob;
+    private readonly CwKeyer? _cwKeyer;
+    private readonly VoiceKeyer? _voiceKeyer;
     private AuthService? _auth;
     private HttpListener? _listener;
     private HttpListener? _dashboardListener;
@@ -76,12 +78,14 @@ public class ApiServer : IDisposable
                      TgxlTuner tgxl, AmpTuner amp, KmtronicService? kmtronic = null,
                      DxClusterClient? cluster = null, SessionStats? stats = null,
                      AudioStreamer? streamer = null, AuthService? auth = null,
-                     AudioTransmitter? txAudio = null, FlexKnobController? flexknob = null)
+                     AudioTransmitter? txAudio = null, FlexKnobController? flexknob = null,
+                     CwKeyer? cwKeyer = null, VoiceKeyer? voiceKeyer = null)
     {
         _radio = radio; _recorder = recorder; _config = config;
         _tgxl = tgxl; _amp = amp; _kmtronic = kmtronic;
         _cluster = cluster; _stats = stats; _streamer = streamer;
         _auth = auth; _txAudio = txAudio; _flexknob = flexknob;
+        _cwKeyer = cwKeyer; _voiceKeyer = voiceKeyer;
 
         var exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".";
         _wwwroot = Path.Combine(exeDir, "wwwroot");
@@ -178,6 +182,12 @@ public class ApiServer : IDisposable
         ["/api/mute-all/on"]     = _ => { var m = _radio.GetAFGain(); var s = _radio.GetSubAFGain(); if (m > 0) _preMuteAF = m; if (s > 0) _preMuteSubAF = s; _radio.SetAFGain(0); _radio.SetSubAFGain(0); return OK("mute_all", 1); },
         ["/api/mute-all/off"]    = _ => { _radio.SetAFGain(_preMuteAF); _radio.SetSubAFGain(_preMuteSubAF); return OK("mute_all", 0); },
         ["/api/mute-all/toggle"] = _ => { var cm = _radio.GetAFGain(); var cs = _radio.GetSubAFGain(); if (cm == 0 && cs == 0) { _radio.SetAFGain(_preMuteAF); _radio.SetSubAFGain(_preMuteSubAF); return OK("mute_all", 0); } if (cm > 0) _preMuteAF = cm; if (cs > 0) _preMuteSubAF = cs; _radio.SetAFGain(0); _radio.SetSubAFGain(0); return OK("mute_all", 1); },
+
+        // CW / voice keyer (transmitting routes are gated on CanTransmit below)
+        ["/api/cw/stop"]      = _ => { _cwKeyer?.StopPlayback(); return OK("cw", "stopped"); },
+        ["/api/cw/status"]    = _ => new { status = "ok", playing = _cwKeyer?.IsPlaying() ?? false },
+        ["/api/voice/stop"]   = _ => { _voiceKeyer?.StopPlayback(); return OK("voice", "stopped"); },
+        ["/api/voice/status"] = _ => new { status = "ok", playing = _voiceKeyer?.IsPlaying ?? false },
 
         // Filters / DSP
         ["/api/toggle/nb"]    = _ => { var c = _radio.GetNB();    _radio.SetNB(!c);    return OK("nb",    !c); },
@@ -295,6 +305,9 @@ public class ApiServer : IDisposable
         ("/api/rxant/",             (s, _)     => RouteRxAnt(s)),
         ("/api/remote-tx/gain/",    (s, _)     => { if (int.TryParse(s, out var g)) { _radio.SetRPortGain(g); return OK("rport_gain", g); } return null; }),
         ("/api/ssb-out-level/set/", (s, _)     => { if (int.TryParse(s, out var lv)) { _radio.SetSSBOutLevel(lv); return OK("ssb_out_level", lv); } return null; }),
+        ("/api/cw/memory/",         (s, _)     => { if (int.TryParse(s, out var m) && _cwKeyer != null) { _cwKeyer.PlayMemory(m); return OK("cw_memory", m); } return null; }),
+        ("/api/cw/send/",           (s, _)     => { if (_cwKeyer != null && !string.IsNullOrWhiteSpace(s)) { _cwKeyer.SendText(Uri.UnescapeDataString(s)); return OK("cw_send", Uri.UnescapeDataString(s)); } return null; }),
+        ("/api/voice/play/",        (s, _)     => { if (int.TryParse(s, out var v) && _voiceKeyer != null) { _voiceKeyer.Play(v - 1); return OK("voice_play", v); } return null; }),
     ];
 
     private static readonly HashSet<string> VfoLockExactBlocked = new(StringComparer.OrdinalIgnoreCase)
@@ -634,7 +647,8 @@ public class ApiServer : IDisposable
                 if (adminResult != null) { WriteJson(resp, adminResult); return; }
             }
 
-            if (readOnly && (trimmed == "/api/ptt/on" || trimmed == "/api/ptt/off" || trimmed == "/api/ptt/key" || trimmed == "/api/ptt/unkey" || trimmed == "/api/ptt/toggle"))
+            if (readOnly && (trimmed == "/api/ptt/on" || trimmed == "/api/ptt/off" || trimmed == "/api/ptt/key" || trimmed == "/api/ptt/unkey" || trimmed == "/api/ptt/toggle"
+                || trimmed.StartsWith("/api/cw/memory/") || trimmed.StartsWith("/api/cw/send/") || trimmed.StartsWith("/api/voice/play/")))
             {
                 var token = GetSessionToken(ctx);
                 if (_auth != null && _auth.ValidateSession(token) && !_auth.CanTransmit(token)) { resp.StatusCode = 403; WriteJson(resp, new { status = "error", message = "Transmit not permitted for this account" }); return; }

@@ -365,6 +365,14 @@ async function pollCluster() {
     });
 }
 
+// ===== KEYER =====
+
+function sendCw() {
+    const el = document.getElementById('cw-text');
+    const txt = (el?.value || '').trim();
+    if (txt) api('/api/cw/send/' + encodeURIComponent(txt));
+}
+
 // ===== CLOCK =====
 
 function updateClock() {
