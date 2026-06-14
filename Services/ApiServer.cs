@@ -393,7 +393,10 @@ public class ApiServer : IDisposable
     private object? BuildClusterSpots()
     {
         if (_cluster == null) return null;
-        var spots = _cluster.Spots.Select(s => new { freq_khz = s.FreqKHz, freq_hz = s.FreqHz,
+        // HF only (< 30 MHz): VHF/UHF spots aren't useful on the dashboard here.
+        var spots = _cluster.Spots
+            .Where(s => s.FreqKHz > 0 && s.FreqKHz < 30000)
+            .Select(s => new { freq_khz = s.FreqKHz, freq_hz = s.FreqHz,
             dx_call = s.Spotted, spotter = s.Spotter, comment = s.Message, time = s.Time.ToString("o"),
             band = s.BandName, mode = s.Mode, entity = s.Entity, flag = s.Flag }).ToList();
         return new { status = "ok", spots, count = spots.Count };
