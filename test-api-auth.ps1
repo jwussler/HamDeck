@@ -13,7 +13,7 @@ function Test-Endpoint {
     $tag = if ($label) { $label } else { $route }
     try {
         $resp = Invoke-WebRequest -Uri $url -Method GET -UseBasicParsing `
-                    -ErrorAction SilentlyContinue -SkipHttpErrorCheck
+                    -ErrorAction SilentlyContinue
         $code = $resp.StatusCode
     } catch {
         # Invoke-WebRequest throws on 4xx/5xx in older PS - catch and extract code
@@ -164,7 +164,7 @@ Write-Host "`nADMIN (expect 401 or 403 - admin only):" -ForegroundColor Yellow
     $url = "$BASE$_"
     try {
         $resp = Invoke-WebRequest -Uri $url -Method GET -UseBasicParsing `
-                    -ErrorAction SilentlyContinue -SkipHttpErrorCheck
+                    -ErrorAction SilentlyContinue
         $code = $resp.StatusCode
     } catch {
         $code = $_.Exception.Response.StatusCode.value__
