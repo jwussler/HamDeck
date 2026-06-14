@@ -326,26 +326,37 @@ public class ApiServer : IDisposable
     //  ROUTE HELPERS
     // =========================================================================
 
-    private const long StatusCacheMaxAgeMs = 1500;
+    // Cache max age - WPF UpdateTick refreshes Last* props every ~200ms, 3000ms is safe headroom.
+    private const long StatusCacheMaxAgeMs = 3000;
 
     private object? BuildApiStatus()
     {
         if (!_radio.Connected)
             return new { connected = false, amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer };
 
+        // Always serve from cache - never call serial methods from a web handler thread.
+        // The WPF UpdateTick refreshes Last* properties every ~200ms via GetFreq() etc.
+        // The serial lock is not re-entrant safe across threads; a cold cache returns
+        // stale=true so the browser knows to retry.
         var cacheAgeMs = Environment.TickCount64 - _radio.LastCacheRefreshMs;
-        if (cacheAgeMs <= StatusCacheMaxAgeMs && _radio.LastFrequency > 0)
+        var stale = cacheAgeMs > StatusCacheMaxAgeMs || _radio.LastFrequency <= 0;
+
+        return new
         {
-            return new { connected = true, freq = _radio.LastFrequency, mode = _radio.LastMode, vfo = _radio.LastVFO,
-                         power = _radio.LastPower, tx = _radio.LastTXState, split = _radio.LastSplit,
-                         amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer,
-                         vfo_locked = _config.VfoLocked, cache_age_ms = cacheAgeMs };
-        }
-        Logger.Debug("API", "Status cache stale ({0}ms) - live query", cacheAgeMs);
-        return new { connected = true, freq = _radio.GetFreq(), mode = _radio.GetMode(), vfo = _radio.GetVFO(),
-                     power = _radio.GetPower(), tx = _radio.GetTXStatus(), split = _radio.GetSplit(),
-                     amp_tuning = _amp.IsActive, tgxl_tuning = _tgxl.IsActive, freq_buffer = _freqBuffer,
-                     vfo_locked = _config.VfoLocked, cache_age_ms = (long)0 };
+            connected   = true,
+            freq        = _radio.LastFrequency,
+            mode        = _radio.LastMode,
+            vfo         = _radio.LastVFO,
+            power       = _radio.LastPower,
+            tx          = _radio.LastTXState,
+            split       = _radio.LastSplit,
+            amp_tuning  = _amp.IsActive,
+            tgxl_tuning = _tgxl.IsActive,
+            freq_buffer = _freqBuffer,
+            vfo_locked  = _config.VfoLocked,
+            cache_age_ms = cacheAgeMs,
+            stale       = stale
+        };
     }
 
     private object? BuildApiStatusFull()
