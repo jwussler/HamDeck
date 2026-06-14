@@ -29,9 +29,11 @@ public class SessionStats
 
     public void RecordBandChange(string band)
     {
-        QSYCount++;
         BandChanges[band] = BandChanges.GetValueOrDefault(band) + 1;
     }
+
+    /// <summary>Count a QSY — a settled move to a frequency a meaningful step from the last spot.</summary>
+    public void RecordQSY() { QSYCount++; }
 
     public void RecordModeChange(string mode)
     {

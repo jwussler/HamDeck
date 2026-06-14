@@ -39,6 +39,8 @@ public partial class MainWindow : Window
     private bool _forceExit;
     private string _lastBand = "";
     private string _lastMode = "";
+    private long _lastQsyFreq;    // last counted QSY frequency (0 = baseline not yet set)
+    private long _prevTickFreq;   // freq from the previous UpdateTick (for settle detection)
 
     // Connection state tracking for auto-reconnect
     private bool _wasConnected;
@@ -451,6 +453,16 @@ public partial class MainWindow : Window
 
             var power = _radio.GetPower();
             PowerLabel.Text = $"Power: {power}W";
+
+            // QSY count: register one move when the frequency SETTLES (unchanged since the
+            // previous tick) at a spot >=1 kHz from the last counted frequency. The settle
+            // gate collapses a tuning sweep into a single QSY instead of counting every step.
+            if (freq > 0 && freq == _prevTickFreq)
+            {
+                if (_lastQsyFreq == 0) _lastQsyFreq = freq;                                  // baseline, no count
+                else if (Math.Abs(freq - _lastQsyFreq) >= 1000) { _stats.RecordQSY(); _lastQsyFreq = freq; }
+            }
+            _prevTickFreq = freq;
 
             var band = BandHelper.GetBand(freq);
             if (!string.IsNullOrEmpty(band) && band != _lastBand)

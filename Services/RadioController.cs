@@ -551,7 +551,15 @@ public class RadioController : IDisposable
     public void SetPreamp(bool on) => Send(on ? "PA01;" : "PA00;", false);
     public void CyclePreamp() => Send($"PA0{(GetPreamp() + 1) % 3};", false);
 
-    public bool GetATT() => !Send("RA0;").Contains("RA000");
+    public bool GetATT()
+    {
+        // Parse the level and fail to OFF on an empty/garbled response (do NOT use a
+        // negated Contains: that reports ATT ON whenever the radio is disconnected).
+        var resp = Send("RA0;");
+        if (!resp.StartsWith("RA0") || resp.Length < 4) return false;
+        var digits = resp.Substring(3).TrimEnd(';');
+        return int.TryParse(digits, out var v) && v > 0;
+    }
     public void SetATT(bool on) => Send(on ? "RA01;" : "RA00;", false);
 
     // ========== AGC ==========

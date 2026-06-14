@@ -58,7 +58,7 @@ public class Config
     [JsonPropertyName("cat_proxy_port")] public int CatProxyPort { get; set; } = 4532;
 
     // Audio Stream settings
-    [JsonPropertyName("audio_stream_enabled")] public bool AudioStreamEnabled { get; set; } = false;
+    [JsonPropertyName("audio_stream_enabled")] public bool AudioStreamEnabled { get; set; } = true;
     [JsonPropertyName("audio_stream_port")] public int AudioStreamPort { get; set; } = 5003;
     [JsonPropertyName("audio_stream_sample_rate")] public int AudioStreamSampleRate { get; set; } = 22050;
 

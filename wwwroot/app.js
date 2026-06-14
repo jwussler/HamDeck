@@ -472,6 +472,14 @@ async function init() {
     const authed = await checkAuth();
     if (!authed) return;
 
+    // Reflect the running app version (from the assembly) in the top bar + tab title.
+    try {
+        const h = await fetch(API + '/api/health').then(r => r.json());
+        const vEl = document.getElementById('app-version');
+        if (h?.version && vEl) vEl.textContent = 'v' + h.version;
+        if (h?.version) document.title = 'HamDeck v' + h.version + ' — Rig Control';
+    } catch { /* leave the static fallback */ }
+
     await pollStatus();
     await pollMeters();
     await pollToggles();
