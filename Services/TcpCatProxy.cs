@@ -55,7 +55,7 @@ public class TcpCatProxy : IDisposable
             try
             {
                 var client = await _listener!.AcceptTcpClientAsync(ct);
-                Logger.Info("CATPROXY", "Client connected from {0}", client.Client.RemoteEndPoint);
+                Logger.Info("CATPROXY", "Client connected from {0}", client.Client.RemoteEndPoint?.ToString() ?? "unknown");
                 _ = Task.Run(() => HandleClient(client, ct));
             }
             catch (OperationCanceledException) { break; }

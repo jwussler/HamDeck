@@ -740,14 +740,19 @@ public class ApiServer : IDisposable
             var login = JsonSerializer.Deserialize<LoginRequest>(await reader.ReadToEndAsync());
             if (login == null || _auth == null) { resp.StatusCode = 400; WriteJson(resp, new { status = "error", message = "Invalid request" }); return; }
 
-            var token = _auth.Login(login.Username ?? "", login.Password ?? "");
+            var uname = login.Username ?? "";
+            if (_auth.IsLockedOut(uname)) { await Task.Delay(500); resp.StatusCode = 429; WriteJson(resp, new { status = "error", message = "Too many failed attempts. Try again in a few minutes." }); return; }
+
+            var token = _auth.Login(uname, login.Password ?? "");
             if (token == null) { await Task.Delay(500); resp.StatusCode = 401; WriteJson(resp, new { status = "error", message = "Invalid credentials" }); return; }
 
             if (_config.AdminOnlyLogin && !_auth.IsAdmin(token))
             { _auth.Logout(token); await Task.Delay(300); resp.StatusCode = 403; WriteJson(resp, new { status = "error", message = "Login is currently restricted to administrators" }); return; }
 
             var maxAge = (_config.WebSessionTimeout > 0 ? _config.WebSessionTimeout : 480) * 60;
-            resp.Headers.Add("Set-Cookie", $"hamdeck_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={maxAge}");
+            // SameSite=Strict: the dashboard is navigated to directly (PWA/bookmark), so Strict
+            // works fully and closes the top-level-navigation CSRF vector on state-changing GETs.
+            resp.Headers.Add("Set-Cookie", $"hamdeck_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={maxAge}");
             WriteJson(resp, new { status = "ok", message = "Login successful" });
         }
         catch (Exception ex) { Logger.Warn("AUTH", "Login error: {0}", ex.Message); resp.StatusCode = 500; WriteJson(resp, new { status = "error", message = "Internal error" }); }

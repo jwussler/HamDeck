@@ -19,6 +19,11 @@ public class AuthService
     private readonly ConcurrentDictionary<string, UserInfo> _users = new();
     private readonly int _sessionTimeoutMinutes;
 
+    // Login brute-force throttle (per username): lock out after MaxLoginFails failures.
+    private readonly ConcurrentDictionary<string, (int Fails, DateTime LockUntil)> _throttle = new();
+    private const int MaxLoginFails = 5;
+    private static readonly TimeSpan LoginLockout = TimeSpan.FromMinutes(5);
+
     // PBKDF2 parameters
     private const int SaltBytes       = 16;
     private const int HashBytes        = 32;
@@ -98,11 +103,18 @@ public class AuthService
             return null;
 
         var key = username.Trim().ToLower();
-        if (!_users.TryGetValue(key, out var user))
+
+        // Brute-force throttle: refuse while locked out.
+        if (_throttle.TryGetValue(key, out var t) && t.LockUntil > DateTime.UtcNow)
             return null;
 
-        if (!VerifyPassword(password, user.PasswordHash))
+        if (!_users.TryGetValue(key, out var user) || !VerifyPassword(password, user.PasswordHash))
+        {
+            RegisterLoginFailure(key);
             return null;
+        }
+
+        _throttle.TryRemove(key, out _);   // success clears the failure window
 
         // Upgrade legacy SHA256 hash to PBKDF2 transparently
         if (!user.PasswordHash.StartsWith(Prefix))
@@ -282,6 +294,29 @@ public class AuthService
     {
         var bytes = RandomNumberGenerator.GetBytes(32);
         return Convert.ToHexString(bytes).ToLower();
+    }
+
+    /// <summary>True if the username is currently locked out from logging in (brute-force throttle).</summary>
+    public bool IsLockedOut(string username) =>
+        _throttle.TryGetValue(username.Trim().ToLower(), out var t) && t.LockUntil > DateTime.UtcNow;
+
+    private void RegisterLoginFailure(string key)
+    {
+        _throttle.AddOrUpdate(key,
+            _ => (1, DateTime.MinValue),
+            (_, cur) =>
+            {
+                // A prior lockout has expired -> start a fresh failure window.
+                if (cur.LockUntil != DateTime.MinValue && cur.LockUntil <= DateTime.UtcNow)
+                    return (1, DateTime.MinValue);
+                var fails = cur.Fails + 1;
+                if (fails >= MaxLoginFails)
+                {
+                    Logger.Warn("AUTH", "User '{0}' locked out after {1} failed logins", key, fails);
+                    return (fails, DateTime.UtcNow + LoginLockout);
+                }
+                return (fails, cur.LockUntil);
+            });
     }
 
     private void PurgeExpired()
