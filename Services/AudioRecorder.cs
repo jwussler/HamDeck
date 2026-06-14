@@ -19,7 +19,6 @@ public class AudioRecorder : IDisposable
     private WaveInEvent? _waveIn;
     private WaveFileWriter? _writer;
     private MemoryStream? _ringBuffer;
-    private WaveFileWriter? _ringWriter;
     private readonly object _lock = new();
     private string? _currentFile;
     private DateTime _recordStart;
@@ -52,9 +51,10 @@ public class AudioRecorder : IDisposable
                 BufferMilliseconds = 100
             };
 
+            // Store raw PCM only (no WAV header). SaveReplay() wraps it in a fresh
+            // WaveFileWriter, so a header here would be replayed as ~0.5ms of click and
+            // would also be stripped inconsistently by the trim logic.
             _ringBuffer = new MemoryStream();
-            _ringWriter = new WaveFileWriter(new IgnoreDisposeStream(_ringBuffer),
-                _waveIn.WaveFormat);
 
             _waveIn.DataAvailable += OnDataAvailable;
             _waveIn.StartRecording();
@@ -83,9 +83,8 @@ public class AudioRecorder : IDisposable
         // to a disposed writer/stream (it sees null after we clear the fields).
         lock (_lock)
         {
-            try { _ringWriter?.Dispose(); _ringBuffer?.Dispose(); } catch { }
+            try { _ringBuffer?.Dispose(); } catch { }
             _waveIn = null;
-            _ringWriter = null;
             _ringBuffer = null;
         }
     }
@@ -94,8 +93,8 @@ public class AudioRecorder : IDisposable
     {
         lock (_lock)
         {
-            // Write to ring buffer
-            _ringWriter?.Write(e.Buffer, 0, e.BytesRecorded);
+            // Write raw PCM to ring buffer
+            _ringBuffer?.Write(e.Buffer, 0, e.BytesRecorded);
 
             // Trim ring buffer if too large
             if (_ringBuffer != null)

@@ -484,7 +484,13 @@ async function init() {
     dom.loading.classList.add('hidden');
     setTimeout(() => dom.loading.style.display = 'none', 300);
 
-    setInterval(async () => { await pollStatus(); await pollMeters(); pollRecording(); }, POLL_FAST);
+    // Chained setTimeout (not setInterval) so a slow API can't stack overlapping
+    // polls and write stale status/meters out of order.
+    (async function fastPoll() {
+        try { await pollStatus(); await pollMeters(); pollRecording(); }
+        catch (e) { /* keep the loop alive across transient errors */ }
+        setTimeout(fastPoll, POLL_FAST);
+    })();
     setInterval(pollToggles, POLL_SLOW);
     setInterval(() => { pollKnobs(); pollSession(); }, POLL_SESSION);
     setInterval(pollCluster, POLL_CLUSTER);

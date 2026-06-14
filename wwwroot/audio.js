@@ -10,6 +10,8 @@ let audioCtx    = null;
 let audioWs     = null;
 let audioPlaying = false;
 let rxGainNode  = null;
+let audioWantsOn = false;          // user intends RX audio on — drives auto-reconnect
+let audioReconnectTimer = null;
 
 function setRxVolume(val) {
     if (rxGainNode) rxGainNode.gain.value = parseFloat(val);
@@ -44,12 +46,17 @@ function setRxVolume(val) {
 })();
 
 function toggleAudio() {
-    if (audioPlaying) stopAudio(); else startAudio();
+    // Drive the toggle off intent (not audioPlaying) so the STOP button also
+    // cancels an in-progress auto-reconnect.
+    if (audioWantsOn) stopAudio(); else startAudio();
 }
 
 function startAudio() {
     const btn      = document.getElementById('btn-audio');
     const statusEl = document.getElementById('audio-status');
+
+    audioWantsOn = true;
+    if (audioReconnectTimer) { clearTimeout(audioReconnectTimer); audioReconnectTimer = null; }
 
     // Kill monitor to prevent TX audio feedback loop when listening remotely
     window.api('/api/mon/off');
@@ -121,14 +128,16 @@ function startAudio() {
             if (statusEl) statusEl.textContent = `Streaming (buf: ${bufferedMs}ms / target: ${targetMs}ms)`;
         };
 
-        audioWs.onclose = () => stopAudio();
-        audioWs.onerror = () => stopAudio();
+        audioWs.onclose = () => handleAudioDrop();
+        audioWs.onerror = () => handleAudioDrop();
     } catch (e) {
         if (statusEl) statusEl.textContent = 'Audio not available';
     }
 }
 
 function stopAudio() {
+    audioWantsOn = false;                       // user-initiated stop — cancel reconnect
+    if (audioReconnectTimer) { clearTimeout(audioReconnectTimer); audioReconnectTimer = null; }
     const btn      = document.getElementById('btn-audio');
     const statusEl = document.getElementById('audio-status');
     if (audioWs)  { audioWs.close();             audioWs  = null; }
@@ -137,6 +146,21 @@ function stopAudio() {
     rxGainNode   = null;
     if (btn)      { btn.textContent = '▶ LISTEN'; btn.classList.remove('playing'); }
     if (statusEl) statusEl.textContent = 'Off';
+}
+
+// Unexpected socket drop (not a user stop): tear down the pipeline and, if the
+// user still wants audio, retry after a short delay. The STOP button (toggleAudio)
+// clears audioWantsOn to cancel this loop.
+function handleAudioDrop() {
+    if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+    audioWs      = null;
+    rxGainNode   = null;
+    audioPlaying = false;
+    if (!audioWantsOn) return;
+    const statusEl = document.getElementById('audio-status');
+    if (statusEl) statusEl.textContent = 'Reconnecting...';
+    if (audioReconnectTimer) clearTimeout(audioReconnectTimer);
+    audioReconnectTimer = setTimeout(() => { if (audioWantsOn) startAudio(); }, 2000);
 }
 
 // ── TX Audio (browser mic → radio) ──────────────────────────────────────────
