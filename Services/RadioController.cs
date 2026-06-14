@@ -142,6 +142,9 @@ public class RadioController : IDisposable
         {
             try
             {
+                // Re-check inside the lock: Disconnect() may have nulled/disposed _port
+                // between the fast-path guard above and acquiring the lock.
+                if (_port == null || !_port.IsOpen) return "";
                 _port.DiscardInBuffer();
                 _port.Write(cmd);
 

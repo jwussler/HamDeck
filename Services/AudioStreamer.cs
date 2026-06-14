@@ -41,6 +41,9 @@ public class AudioStreamer : IDisposable
     private bool _cachedTx;
     private bool _cachedConnected;
 
+    private Task? _sendTask;
+    private Task? _statusTask;
+
     public void UpdateStatus(long freq, string mode, string band, int power, bool tx, bool connected)
     {
         _cachedFreq = freq;
@@ -67,13 +70,15 @@ public class AudioStreamer : IDisposable
         _cts = new CancellationTokenSource();
         IsStreaming = true;
 
-        // Single send loop — handles both audio and status
-        Task.Factory.StartNew(() => SendLoopAsync(_cts.Token),
-            _cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        // Single send loop — handles both audio and status.
+        // .Unwrap() so the field holds the inner async Task (not the StartNew wrapper),
+        // letting Dispose await actual loop completion.
+        _sendTask = Task.Factory.StartNew(() => SendLoopAsync(_cts.Token),
+            _cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         // Status producer — enqueues status JSON into the same queue
-        Task.Factory.StartNew(() => StatusProducerAsync(_cts.Token),
-            _cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        _statusTask = Task.Factory.StartNew(() => StatusProducerAsync(_cts.Token),
+            _cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         Logger.Info("STREAM", "Audio streamer started ({0} Hz, 16-bit mono)",
             _config.RecordSampleRate);
@@ -413,6 +418,13 @@ public class AudioStreamer : IDisposable
         _cts?.Cancel();
         try { _dataReady.Release(); } catch { }
 
+        // Wait for the loops to exit BEFORE disposing _dataReady — otherwise a loop
+        // still parked in WaitAsync(_dataReady) throws ObjectDisposedException on shutdown.
+        var loops = new List<Task>();
+        if (_sendTask != null) loops.Add(_sendTask);
+        if (_statusTask != null) loops.Add(_statusTask);
+        try { Task.WaitAll(loops.ToArray(), 2000); } catch { }
+
         foreach (var kvp in _clients)
         {
             try { kvp.Value.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None).Wait(1000); }
@@ -420,6 +432,7 @@ public class AudioStreamer : IDisposable
         }
         _clients.Clear();
         _dataReady.Dispose();
+        _cts?.Dispose();
 
         Logger.Info("STREAM", "Audio streamer stopped");
     }

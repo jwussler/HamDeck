@@ -540,7 +540,21 @@ public class ApiServer : IDisposable
     {
         while (!ct.IsCancellationRequested && listener.IsListening)
         {
-            try { var ctx = await listener.GetContextAsync(); _ = Task.Run(() => HandleRequestAsync(ctx, readOnly, ct)); }
+            try
+            {
+                var ctx = await listener.GetContextAsync();
+                _ = Task.Run(async () =>
+                {
+                    try { await HandleRequestAsync(ctx, readOnly, ct); }
+                    catch (Exception ex)
+                    {
+                        // Never let a handler exception escape unobserved or leave the
+                        // response open (the client would hang until timeout).
+                        Logger.Debug("API", "Unhandled request error: {0}", ex.Message);
+                        try { ctx.Response.StatusCode = 500; ctx.Response.Close(); } catch { }
+                    }
+                });
+            }
             catch (ObjectDisposedException) { break; }
             catch (Exception ex) { Logger.Debug("API", "Listener error: {0}", ex.Message); }
         }
@@ -644,7 +658,10 @@ public class ApiServer : IDisposable
         if (path == "/" || path == "") path = "/index.html";
         var relativePath = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
         var fullPath = Path.GetFullPath(Path.Combine(_wwwroot, relativePath));
-        if (!fullPath.StartsWith(Path.GetFullPath(_wwwroot))) return false;
+        var rootFull = Path.GetFullPath(_wwwroot);
+        // Require an exact match or a path *inside* wwwroot (with separator) so a sibling
+        // directory like "wwwroot_x" can't satisfy a bare prefix check.
+        if (fullPath != rootFull && !fullPath.StartsWith(rootFull + Path.DirectorySeparatorChar)) return false;
         if (!File.Exists(fullPath)) return false;
         try
         {
@@ -748,6 +765,19 @@ public class ApiServer : IDisposable
 
     private async Task<object?> HandleAdminRoute(string path, HttpListenerContext ctx)
     {
+        // CSRF hardening: state-changing admin actions must be POST, not GET.
+        // (Reads below — users/sessions/radio/presets/lockdown-status etc. — stay GET.)
+        bool mutating =
+            path.StartsWith("/api/admin/user/remove/") ||
+            path.StartsWith("/api/admin/kick/") ||
+            path == "/api/admin/lockdown/on" || path == "/api/admin/lockdown/off" ||
+            path.StartsWith("/api/admin/user/tx/") ||
+            path == "/api/admin/mic/release" ||
+            path.StartsWith("/api/admin/rport-gain/") ||
+            path.StartsWith("/api/admin/presets/remove/");
+        if (mutating && ctx.Request.HttpMethod != "POST")
+            return new { status = "error", message = "POST required for this action" };
+
         if (path == "/api/admin/users")    return new { status = "ok", users    = _auth!.GetUsers() };
         if (path == "/api/admin/sessions") return new { status = "ok", sessions = _auth!.GetActiveSessions() };
 

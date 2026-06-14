@@ -27,13 +27,20 @@ public class TgxlTuner
 
     public Dictionary<string, object> Tune()
     {
-        if (IsActive)
+        lock (_lock)
         {
-            Logger.Info("TGXL", "Stopping (toggle)");
-            Stop();
-            // Don't block UI thread - fire and forget the wait
-            Task.Run(() => Thread.Sleep(500));
-            return new() { ["ok"] = true, ["action"] = "stopped", ["tuning"] = false };
+            if (IsActive)
+            {
+                Logger.Info("TGXL", "Stopping (toggle)");
+                _stopFlag = true;
+                // Don't block UI thread - fire and forget the wait
+                Task.Run(() => Thread.Sleep(500));
+                return new() { ["ok"] = true, ["action"] = "stopped", ["tuning"] = false };
+            }
+            // Claim active under the lock so a rapid second Tune() can't launch a
+            // second worker (which would mean double PTT/transmit).
+            IsActive = true;
+            _stopFlag = false;
         }
 
         Logger.Info("TGXL", "Tune() called - launching worker");
@@ -43,8 +50,7 @@ public class TgxlTuner
 
     private void TuneWorker()
     {
-        lock (_lock) { IsActive = true; _stopFlag = false; }
-
+        // IsActive/_stopFlag already claimed atomically in Tune().
         int origPower = 0;
         string origMode = "";
         bool stateChanged = false;
@@ -271,12 +277,19 @@ public class AmpTuner
 
     public Dictionary<string, object> Tune()
     {
-        if (IsActive)
+        lock (_lock)
         {
-            Logger.Info("AMP", "Stopping (toggle)");
-            Stop();
-            Task.Run(() => Thread.Sleep(500));
-            return new() { ["ok"] = true, ["action"] = "stopped", ["tuning"] = false };
+            if (IsActive)
+            {
+                Logger.Info("AMP", "Stopping (toggle)");
+                _stopFlag = true;
+                Task.Run(() => Thread.Sleep(500));
+                return new() { ["ok"] = true, ["action"] = "stopped", ["tuning"] = false };
+            }
+            // Claim active under the lock so a rapid second Tune() can't launch a
+            // second worker (which would mean double PTT/transmit).
+            IsActive = true;
+            _stopFlag = false;
         }
 
         Logger.Info("AMP", "Tune() called - launching worker");
@@ -287,8 +300,7 @@ public class AmpTuner
 
     private void TuneWorker()
     {
-        lock (_lock) { IsActive = true; _stopFlag = false; }
-
+        // IsActive/_stopFlag already claimed atomically in Tune().
         try
         {
             Logger.Info("AMP", "=== AMP TUNE SEQUENCE START ===");

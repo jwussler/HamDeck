@@ -156,19 +156,28 @@ public class DxClusterClient : IDisposable
     }
 
     /// <summary>Tune radio to a DX spot frequency</summary>
-    public async void TuneToSpot(DXSpot spot)
+    public async Task TuneToSpot(DXSpot spot)
     {
         if (!_radio.Connected) return;
 
-        // Map cluster mode names to FTDX-101MP CAT mode names
-        var radioMode = MapToRadioMode(spot.Mode, spot.FreqHz);
+        try
+        {
+            // Map cluster mode names to FTDX-101MP CAT mode names
+            var radioMode = MapToRadioMode(spot.Mode, spot.FreqHz);
 
-        // Set freq FIRST (may trigger band change), wait for radio to settle, then mode
-        _radio.SetFreq(spot.FreqHz);
-        await Task.Delay(100);
-        _radio.SetMode(radioMode);
-        Logger.Info("CLUSTER", "Tuned to {0} on {1} | mode: {2} -> {3}",
-            spot.Spotted, spot.DisplayFreq, spot.Mode, radioMode);
+            // Set freq FIRST (may trigger band change), wait for radio to settle, then mode
+            _radio.SetFreq(spot.FreqHz);
+            await Task.Delay(100);
+            _radio.SetMode(radioMode);
+            Logger.Info("CLUSTER", "Tuned to {0} on {1} | mode: {2} -> {3}",
+                spot.Spotted, spot.DisplayFreq, spot.Mode, radioMode);
+        }
+        catch (Exception ex)
+        {
+            // Was async void: a serial error here would have been an unobservable
+            // process-level crash. Contain and log instead.
+            Logger.Error("CLUSTER", "TuneToSpot failed: {0}", ex.Message);
+        }
     }
 
     /// <summary>Map DX cluster mode names to Yaesu FTDX-101MP CAT mode codes</summary>

@@ -70,17 +70,24 @@ public class AudioRecorder : IDisposable
     public void StopBuffer()
     {
         IsBuffering = false;
+        // Stop the capture device first, OUTSIDE the lock: StopRecording can block on an
+        // in-flight OnDataAvailable callback, which itself needs _lock — locking here
+        // would deadlock. After this returns, no further callbacks fire.
         try
         {
             _waveIn?.StopRecording();
             _waveIn?.Dispose();
-            _ringWriter?.Dispose();
-            _ringBuffer?.Dispose();
         }
         catch { }
-        _waveIn = null;
-        _ringWriter = null;
-        _ringBuffer = null;
+        // Dispose the ring buffer under the lock so a final racing callback can't write
+        // to a disposed writer/stream (it sees null after we clear the fields).
+        lock (_lock)
+        {
+            try { _ringWriter?.Dispose(); _ringBuffer?.Dispose(); } catch { }
+            _waveIn = null;
+            _ringWriter = null;
+            _ringBuffer = null;
+        }
     }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e)

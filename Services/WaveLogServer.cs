@@ -22,6 +22,8 @@ public class WaveLogServer : IDisposable
     private readonly List<WebSocket> _clients = new();
     private readonly object _clientLock = new();
     private CancellationTokenSource? _cts;
+    private HttpListener? _httpListener;
+    private HttpListener? _wsListener;
 
     private long _lastFreq;
     private string _lastMode = "";
@@ -69,6 +71,7 @@ public class WaveLogServer : IDisposable
             listener.Prefixes.Add("http://localhost:54321/");
             listener.Start();
         }
+        _httpListener = listener;
 
         while (!ct.IsCancellationRequested)
         {
@@ -118,6 +121,7 @@ public class WaveLogServer : IDisposable
             listener.Prefixes.Add("http://localhost:54322/");
             listener.Start();
         }
+        _wsListener = listener;
 
         while (!ct.IsCancellationRequested)
         {
@@ -271,6 +275,10 @@ public class WaveLogServer : IDisposable
     public void Dispose()
     {
         _cts?.Cancel();
+        // Close the listeners so the accept loops' blocked GetContextAsync throws
+        // ObjectDisposedException and exits (GetContextAsync ignores the token).
+        try { _httpListener?.Close(); } catch { }
+        try { _wsListener?.Close(); } catch { }
         lock (_clientLock)
         {
             foreach (var ws in _clients)

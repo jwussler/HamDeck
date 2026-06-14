@@ -270,7 +270,7 @@ async function addUser() {
 
 async function removeUser(username) {
     if (!confirm('Remove user ' + username + '?')) return;
-    await apiFetch('/api/admin/user/remove/' + username);
+    await apiPost('/api/admin/user/remove/' + username, {});
     loadUsers(); loadSessions();
 }
 
@@ -284,25 +284,25 @@ async function changePassword() {
 }
 
 async function kickUser(username) {
-    await apiFetch('/api/admin/kick/' + username);
+    await apiPost('/api/admin/kick/' + username, {});
     loadSessions();
 }
 
 async function releaseMic() {
-    const data = await apiFetch('/api/admin/mic/release');
+    const data = await apiPost('/api/admin/mic/release', {});
     showMsg('user-msg', data.message || 'Mic released', true);
     loadTxStatus();
 }
 
 async function setLockdown(enable) {
-    const data = await apiFetch('/api/admin/lockdown/' + (enable ? 'on' : 'off'));
+    const data = await apiPost('/api/admin/lockdown/' + (enable ? 'on' : 'off'), {});
     updateLockdownBadge(data.admin_only_login);
     showMsg('user-msg', data.message || (enable ? 'Login locked' : 'Login unlocked'), data.status === 'ok');
 }
 
 async function setUserTx(username, allow) {
     const action = allow ? 'enable' : 'disable';
-    const data = await apiFetch(`/api/admin/user/tx/${action}/${username}`);
+    const data = await apiPost(`/api/admin/user/tx/${action}/${username}`, {});
     if (data.status === 'ok') loadUsers();
     else showMsg('user-msg', data.message || 'Error', false);
 }
@@ -317,7 +317,7 @@ document.getElementById('rport-slider').addEventListener('input', (e) => {
     document.getElementById('rport-val').textContent = e.target.value;
 });
 document.getElementById('rport-slider').addEventListener('change', async (e) => {
-    await apiFetch('/api/admin/rport-gain/' + e.target.value);
+    await apiPost('/api/admin/rport-gain/' + e.target.value, {});
 });
 
 // Init

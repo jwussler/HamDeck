@@ -34,7 +34,9 @@ async function checkAuth() {
         }
         return true;
     } catch {
-        return true;
+        // Fail closed: a failed auth-status check must NOT be treated as authenticated.
+        console.warn('[HamDeck] auth status check failed — treating as unauthenticated');
+        return false;
     }
 }
 

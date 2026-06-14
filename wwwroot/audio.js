@@ -169,7 +169,7 @@ async function startMic() {
         const source  = micCtx.createMediaStreamSource(micStream);
         const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const token   = window.sessionToken;
-        const tokenParam = token ? `?token=${token}` : '';
+        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
         micWs = new WebSocket(`${wsProto}//${window.location.host}/ws/tx${tokenParam}`);
         micWs.binaryType = 'arraybuffer';
 

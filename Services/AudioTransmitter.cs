@@ -23,6 +23,7 @@ public class AudioTransmitter : IDisposable
     private BufferedWaveProvider? _buffer;
     private VolumeWaveProvider16? _volumeProvider;
     private WebSocket? _activeClient;
+    private bool _clientConnected;          // guarded by _lock — atomic single-client claim
     private readonly object _lock = new();
     private volatile bool _active;
     private bool _prebuffering;
@@ -163,8 +164,15 @@ public class AudioTransmitter : IDisposable
     /// </summary>
     public async Task HandleWebSocketClient(HttpListenerContext httpCtx, CancellationToken ct)
     {
-        // Only allow one TX audio client
-        if (_activeClient?.State == WebSocketState.Open)
+        // Only allow one TX audio client. Claim the slot atomically BEFORE any await,
+        // so two near-simultaneous connections can't both pass the check.
+        bool gotSlot;
+        lock (_lock)
+        {
+            gotSlot = !_clientConnected && _activeClient?.State != WebSocketState.Open;
+            if (gotSlot) _clientConnected = true;
+        }
+        if (!gotSlot)
         {
             Logger.Warn("TXAUDIO", "Rejected second client — already streaming");
             try
@@ -187,6 +195,7 @@ public class AudioTransmitter : IDisposable
         catch (Exception ex)
         {
             Logger.Error("TXAUDIO", "WebSocket accept failed: {0}", ex.Message);
+            lock (_lock) _clientConnected = false;   // release the claim
             return;
         }
 
@@ -305,6 +314,7 @@ public class AudioTransmitter : IDisposable
         }
         finally
         {
+            lock (_lock) _clientConnected = false;   // release the single-client claim
             _activeClient = null;
             Logger.Info("TXAUDIO", "Client disconnected");
 

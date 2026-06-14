@@ -482,7 +482,7 @@ public class DxClusterWindow : Window
     {
         if (_spotList.SelectedItem is DXSpot spot)
         {
-            _cluster.TuneToSpot(spot);
+            _ = _cluster.TuneToSpot(spot);
             _statusBar.Text = string.Format("\u27F9 Tuned to {0} on {1} kHz ({2})",
                 spot.Spotted, spot.DisplayFreq, spot.Mode);
         }
