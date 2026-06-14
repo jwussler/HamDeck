@@ -373,6 +373,27 @@ function sendCw() {
     if (txt) api('/api/cw/send/' + encodeURIComponent(txt));
 }
 
+// Brief transient message (the main dashboard has no other notification UI).
+function toast(msg) {
+    let el = document.getElementById('toast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'toast';
+        el.style.cssText = 'position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:#1a2740;color:#fff;padding:0.5rem 1rem;border:1px solid var(--accent,#2d8cf0);border-radius:6px;z-index:9999;font-size:0.85rem;';
+        document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.display = 'block';
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+// AMP TUNE is local-only; surface the server's refusal instead of silently no-op'ing.
+async function ampTune() {
+    const r = await api('/api/tune/amp');
+    if (r && r.status === 'error') toast(r.message || 'Amp tune is only available locally');
+}
+
 // ===== CLOCK =====
 
 function updateClock() {

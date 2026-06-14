@@ -59,8 +59,6 @@ public class Config
 
     // Audio Stream settings
     [JsonPropertyName("audio_stream_enabled")] public bool AudioStreamEnabled { get; set; } = true;
-    [JsonPropertyName("audio_stream_port")] public int AudioStreamPort { get; set; } = 5003;
-    [JsonPropertyName("audio_stream_sample_rate")] public int AudioStreamSampleRate { get; set; } = 22050;
 
     // Web authentication
     [JsonPropertyName("web_username")] public string WebUsername { get; set; } = "wa0o";
@@ -112,9 +110,6 @@ public class Config
     [JsonPropertyName("cluster_api_url")] public string ClusterAPIURL { get; set; } = "https://api.wa0o.com/dxcache/spots";
     [JsonPropertyName("cluster_poll_interval")] public int ClusterPollInterval { get; set; } = 30;
 
-    // Voice Keyer
-    [JsonPropertyName("voicekeyer_enabled")] public bool VoiceKeyerEnabled { get; set; }
-
     // Frequency presets (user-configurable, used by /api/preset/{name})
     [JsonPropertyName("frequency_presets")] public List<FrequencyPreset> FrequencyPresets { get; set; } = new();
 
@@ -129,10 +124,6 @@ public class Config
     // Logging
     [JsonPropertyName("log_level")] public string LogLevel { get; set; } = "info";
     [JsonPropertyName("log_to_file")] public bool LogToFile { get; set; }
-
-    // UI preferences
-    [JsonPropertyName("show_cluster_panel")] public bool ShowClusterPanel { get; set; } = true;
-    [JsonPropertyName("show_stats_panel")] public bool ShowStatsPanel { get; set; }
 
     // --- Computed paths ---
     [JsonIgnore]
@@ -191,8 +182,6 @@ public class Config
         if (PTTQSYThresholdKHz == 0) PTTQSYThresholdKHz = 10;
         if (APIPort == 0) APIPort = 5001;
         if (CatProxyPort == 0) CatProxyPort = 4532;
-        if (AudioStreamPort == 0) AudioStreamPort = 5003;
-        if (AudioStreamSampleRate == 0) AudioStreamSampleRate = 22050;
         if (TGXLPort == 0) TGXLPort = 9010;
         if (KmtronicPort == 0) KmtronicPort = 12345;
         if (WavelogStationID == 0) WavelogStationID = 1;
@@ -223,7 +212,6 @@ public class Config
         if (!validBauds.Contains(RadioBaud)) errors.Add("Invalid baud rate");
         if (APIPort < 1 || APIPort > 65535) errors.Add("API port must be 1-65535");
         if (CatProxyPort < 1 || CatProxyPort > 65535) errors.Add("CAT proxy port must be 1-65535");
-        if (AudioStreamPort < 1 || AudioStreamPort > 65535) errors.Add("Audio stream port must be 1-65535");
         int[] validSR = [8000, 11025, 22050, 44100, 48000];
         if (!validSR.Contains(RecordSampleRate)) errors.Add("Invalid sample rate");
         if (WavelogEnabled && string.IsNullOrEmpty(WavelogURL)) errors.Add("Wavelog URL required when enabled");
