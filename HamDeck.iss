@@ -3,7 +3,7 @@
 ; Then compile this script with Inno Setup
 
 #define MyAppName "HamDeck"
-#define MyAppVersion "3.4.1"
+#define MyAppVersion "3.4.2"
 #define MyAppPublisher "WA0O"
 #define MyAppURL "https://wa0o.com"
 #define MyAppExeName "HamDeck.exe"
