@@ -40,6 +40,8 @@ public class ApiServer : IDisposable
     private HttpListener? _dashboardListener;
     private CancellationTokenSource? _cts;
     private string _freqBuffer = "";
+    private int _preMuteAF = 128;      // main RX volume (0-255) to restore on unmute
+    private int _preMuteSubAF = 128;   // sub  RX volume (0-255) to restore on unmute
     private readonly string _wwwroot;
 
     private const int LocalPowerCap = 100;
@@ -163,15 +165,15 @@ public class ApiServer : IDisposable
         ["/api/volume/get"]      = _ => { var v = _radio.GetAFGain(); return new { status = "ok", volume = v * 100 / 255, raw = v }; },
         ["/api/volume/up"]       = _ => { _radio.SetAFGain(_radio.GetAFGain() + 13); return OK(); },
         ["/api/volume/down"]     = _ => { _radio.SetAFGain(_radio.GetAFGain() - 13); return OK(); },
-        ["/api/mute/on"]         = _ => { _radio.SetAFGain(0);   return OK("mute", 1); },
-        ["/api/mute/off"]        = _ => { _radio.SetAFGain(128); return OK("mute", 0); },
-        ["/api/mute/toggle"]     = _ => { if (_radio.GetAFGain() > 0) { _radio.SetAFGain(0); return OK("mute", 1); } _radio.SetAFGain(128); return OK("mute", 0); },
-        ["/api/mute-sub/on"]     = _ => { _radio.SetSubAFGain(0);   return OK("mute_sub", 1); },
-        ["/api/mute-sub/off"]    = _ => { _radio.SetSubAFGain(128); return OK("mute_sub", 0); },
-        ["/api/mute-sub/toggle"] = _ => { if (_radio.GetSubAFGain() > 0) { _radio.SetSubAFGain(0); return OK("mute_sub", 1); } _radio.SetSubAFGain(128); return OK("mute_sub", 0); },
-        ["/api/mute-all/on"]     = _ => { _radio.SetAFGain(0); _radio.SetSubAFGain(0);     return OK("mute_all", 1); },
-        ["/api/mute-all/off"]    = _ => { _radio.SetAFGain(128); _radio.SetSubAFGain(128); return OK("mute_all", 0); },
-        ["/api/mute-all/toggle"] = _ => { bool m = _radio.GetAFGain() == 0, s = _radio.GetSubAFGain() == 0; if (m && s) { _radio.SetAFGain(128); _radio.SetSubAFGain(128); return OK("mute_all", 0); } _radio.SetAFGain(0); _radio.SetSubAFGain(0); return OK("mute_all", 1); },
+        ["/api/mute/on"]         = _ => { var c = _radio.GetAFGain(); if (c > 0) _preMuteAF = c; _radio.SetAFGain(0); return OK("mute", 1); },
+        ["/api/mute/off"]        = _ => { _radio.SetAFGain(_preMuteAF); return OK("mute", 0); },
+        ["/api/mute/toggle"]     = _ => { var c = _radio.GetAFGain(); if (c > 0) { _preMuteAF = c; _radio.SetAFGain(0); return OK("mute", 1); } _radio.SetAFGain(_preMuteAF); return OK("mute", 0); },
+        ["/api/mute-sub/on"]     = _ => { var c = _radio.GetSubAFGain(); if (c > 0) _preMuteSubAF = c; _radio.SetSubAFGain(0); return OK("mute_sub", 1); },
+        ["/api/mute-sub/off"]    = _ => { _radio.SetSubAFGain(_preMuteSubAF); return OK("mute_sub", 0); },
+        ["/api/mute-sub/toggle"] = _ => { var c = _radio.GetSubAFGain(); if (c > 0) { _preMuteSubAF = c; _radio.SetSubAFGain(0); return OK("mute_sub", 1); } _radio.SetSubAFGain(_preMuteSubAF); return OK("mute_sub", 0); },
+        ["/api/mute-all/on"]     = _ => { var m = _radio.GetAFGain(); var s = _radio.GetSubAFGain(); if (m > 0) _preMuteAF = m; if (s > 0) _preMuteSubAF = s; _radio.SetAFGain(0); _radio.SetSubAFGain(0); return OK("mute_all", 1); },
+        ["/api/mute-all/off"]    = _ => { _radio.SetAFGain(_preMuteAF); _radio.SetSubAFGain(_preMuteSubAF); return OK("mute_all", 0); },
+        ["/api/mute-all/toggle"] = _ => { var cm = _radio.GetAFGain(); var cs = _radio.GetSubAFGain(); if (cm == 0 && cs == 0) { _radio.SetAFGain(_preMuteAF); _radio.SetSubAFGain(_preMuteSubAF); return OK("mute_all", 0); } if (cm > 0) _preMuteAF = cm; if (cs > 0) _preMuteSubAF = cs; _radio.SetAFGain(0); _radio.SetSubAFGain(0); return OK("mute_all", 1); },
 
         // Filters / DSP
         ["/api/toggle/nb"]    = _ => { var c = _radio.GetNB();    _radio.SetNB(!c);    return OK("nb",    !c); },

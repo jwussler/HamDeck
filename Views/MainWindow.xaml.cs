@@ -139,7 +139,7 @@ public partial class MainWindow : Window
                 _config.TxAudioDevice >= 0 ? _config.TxAudioDevice.ToString() : "auto-detect");
         }
 
-        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, streamer: _streamer, auth: auth, txAudio: _txAudio, flexknob: _flexknob);
+        _api = new ApiServer(_radio, _recorder, _config, _tgxl, _amp, _kmtronic, cluster: _cluster, stats: _stats, streamer: _streamer, auth: auth, txAudio: _txAudio, flexknob: _flexknob);
         if (_config.APIEnabled) _api.Start();
 
         if (_config.CatProxyEnabled)
