@@ -15,6 +15,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- The test project lives in a subfolder; keep its sources out of the app build. -->
+  <ItemGroup>
+    <Compile Remove="HamDeck.Tests\**" />
+    <Content Remove="HamDeck.Tests\**" />
+    <None Remove="HamDeck.Tests\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
